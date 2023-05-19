@@ -17,7 +17,6 @@
 
 :_start
   `
-  
   ;;; setup the data-stack
   
   mov rdi, 0         ; desired mapping address
@@ -81,10 +80,24 @@
   ;
 
 :main
-  "hello, world!\n" 
-  dup
-  cStrLen
-  writeString
+  "hello, world!" dup dup
+  write write write
+  "narp" panic
+  ;
+
+:write
+       dup cStrLen 1 cWrite
+  "\n" dup cStrLen 1 cWrite
+  ;
+  
+:log
+       dup cStrLen 2 cWrite
+  "\n" dup cStrLen 2 cWrite
+  ;
+
+:panic
+  log
+  1 exit
   ;
 
 :cStrLen
@@ -113,18 +126,35 @@
   `
   ;
 
-:writeString
+:cWrite
   `
   ;; I am aware I am ignoring the possibility of failed or partial writes here
   
+  sub r14, 8     ; pop fd into rdi
+  mov rdi, [r14] ;
   sub r14, 8     ; pop string length into rdx
   mov rdx, [r14] ;
   sub r14, 8     ; pop string pointer into rsi
   mov rsi, [r14] ; 
-  mov rdi, 1     ; stdout
   mov rax, 1     ; read syscall
   syscall
-  mov [r14], rax ; push the result
-  add r14, 8
+  
+  test rax,rax
+  jns .good      ; jump to good if not signed ( negative = error )
+  
+  mov rdi, 3     ; exit-code 3 = bad write ( including retry for now )
+  mov rax, 60    ;
+  syscall
+  
+ .good:
+  `
+  ;
+
+:exit
+  `
+  sub r14, 8     ; pop exit code into rdi
+  mov rdi, [r14] ;
+  mov rax, 60    ; exit syscall
+  syscall
   `
   ;

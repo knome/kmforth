@@ -212,6 +212,28 @@ def extract_string( initial, characters ):
         value  = ''.join( bits )  ,
     )
 
+def extract_number( initial, characters ):
+    bits = [ initial.character() ]
+    while True:
+        pc = characters.take()
+        if not pc:
+            break
+        cc = pc.character()
+        if cc in '0123456789.':
+            bits.append( cc )
+            characters.take()
+            continue
+        else:
+            break
+    if '.' in bits:
+        raise Exception( 'float not currently handled' )
+    return Token(
+        line    = initial.line()   ,
+        column  = initial.column() ,
+        kind    = 'integer'        ,
+        value   = ''.join( bits )  ,
+    )
+
 def extract_code( initial, characters ):
     bits = []
     while True:
@@ -372,6 +394,8 @@ def analyze_definitions( definitions ):
                 pass
             elif cc.kind() == 'code':
                 pass
+            elif cc.kind() == 'integer':
+                pass
             else:
                 raise Exception( 'wat' )
     
@@ -451,6 +475,11 @@ def generate_code( functions ):
                 
                 code.append( '   mov qword [r14], %s\n' % sn )
                 code.append( '   add r14, 8\n' )
+                
+            elif command.kind() == 'integer':
+                code.append( '   mov qword [r14], %s\n' % command.value() )
+                code.append( '   add r14, 8\n' )
+                
             else:
                 raise Exception( 'wat %s %s' % ( str( command.kind() ), repr( command.value() ) ) )
         

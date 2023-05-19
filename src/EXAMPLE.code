@@ -81,11 +81,10 @@
   ;
 
 :main
-  "hello world" 
+  "hello, world!\n" 
+  dup
   cStrLen
-  # dup
-  # stringLen
-  # writeString
+  writeString
   ;
 
 :cStrLen
@@ -110,6 +109,22 @@
   `
   mov rax, [r14-8] ; push whatever is on the top again
   mov [r14], rax  
+  add r14, 8
+  `
+  ;
+
+:writeString
+  `
+  ;; I am aware I am ignoring the possibility of failed or partial writes here
+  
+  sub r14, 8     ; pop string length into rdx
+  mov rdx, [r14] ;
+  sub r14, 8     ; pop string pointer into rsi
+  mov rsi, [r14] ; 
+  mov rdi, 1     ; stdout
+  mov rax, 1     ; read syscall
+  syscall
+  mov [r14], rax ; push the result
   add r14, 8
   `
   ;

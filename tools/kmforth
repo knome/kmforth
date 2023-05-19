@@ -177,19 +177,33 @@ def discard_whitespace( characters ):
     return
 
 def extract_string( initial, characters ):
-    bits = []
+    bits   = []
+    escape = False
     while True:
         nc = characters.take()
         if not nc:
             raise Exception( 'unterminated string starting at: %s' % repr( initial ) )
         cc = nc.character()
         
-        if cc == '"':
-            break
-        elif cc == "\\":
-            raise Exception( 'string escapes not yet programmed in' )
+        if escape:
+            escape = False
+            if cc == 'n':
+                bits.append( '\n' )
+                continue
+            elif cc == '"':
+                bits.append( '"' )
+                continue
+            else:
+                raise Exception( 'unknown escape: %s' % repr( '\\' + cc ) )
         else:
-            bits.append( cc )
+            if cc == '"':
+                break
+            elif cc == "\\":
+                escape = True
+                continue
+            else:
+                bits.append( cc )
+                continue
     
     return Token(
         line   = initial.line()   ,
@@ -432,7 +446,8 @@ def generate_code( functions ):
                 sn = "km_c_" + str(nns)
                 nns += 1
                 data.append( '  ' + sn + ':\n' )
-                data.append( "    db '" + command.value() + "', 0\n" );
+                # convert \n into 10 here ( 10, 13 for windows, but fuck those guys
+                data.append( "    db %s\n" % asm_stringize( command.value() ) )
                 
                 code.append( '   mov qword [r14], %s\n' % sn )
                 code.append( '   add r14, 8\n' )
@@ -447,6 +462,43 @@ def generate_code( functions ):
         code.append( '    jmp [r15]\n' )
         
     return '\n'.join( [''.join(pre), ''.join( data ), ''.join( code ) ] )
+    
+def asm_stringize( ss ):
+    bits      = []
+    instr     = False
+    for cc in ss:
+        if cc.lower() in ' abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()[]{}|,':
+            if instr:
+                bits.append( cc )
+                continue
+            else:
+                if bits:
+                    bits.append( ',' )
+                bits.append( "'" )
+                bits.append( cc )
+                instr = True
+        else:
+            if instr:
+                bits.append( "'")
+                instr = False
+            first = None
+            for bit in cc.encode('utf-8').hex():
+                if first == None:
+                    first = bit
+                else:
+                    if bits:
+                        bits.append( ',' )
+                    bits.append( '0x' + first + bit )
+                    first = None
+    if instr:
+        bits.append( "'" )
+    
+    if bits:
+        bits.append(',')
+    
+    bits.append( '0' )
+    
+    return ''.join( bits )
     
 #####
 

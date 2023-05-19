@@ -23,6 +23,8 @@ Good luck.
 
 # How
 
+everything assumes you're using `bash` on `linux`
+
 ``` bash
 ./tools/compile src/Example.code
 ```

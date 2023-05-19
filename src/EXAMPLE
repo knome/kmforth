@@ -1,0 +1,8 @@
+
+@"STANDARD";
+
+:main
+  "hello, world!" dup dup
+  write write write
+  "narp" panic
+  ;

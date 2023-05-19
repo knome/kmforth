@@ -79,12 +79,6 @@
   main
   ;
 
-:main
-  "hello, world!" dup dup
-  write write write
-  "narp" panic
-  ;
-
 :write
        dup cStrLen 1 cWrite
   "\n" dup cStrLen 1 cWrite

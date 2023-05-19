@@ -13,6 +13,8 @@ Not a REPL. Compiled only.
 
 No runtime name additions or changes.
 
+Includes are modular (not text inserts) but the namespace is flat.
+
 There's a stack. Functions pop and push to it.
 
 The stack value is a union of anything that fits in a 64 bit slot.

@@ -6,6 +6,8 @@
 # https://stackoverflow.com/questions/2420813/using-gdb-to-single-step-assembly-code-outside-specified-executable-causes-error
 
 import sys
+import os
+import optparse
 
 NUMBERS  = set( '0123456789' )
 LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz')
@@ -13,21 +15,111 @@ LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz')
 WORDSTART = LETTERS.union( set('_') )
 WORDBITS  = LETTERS.union( NUMBERS ).union( '_-:' )
 
-STRUCTBITS = ':;[]{}'
+STRUCTBITS = ':;[]{}@'
 
 def log( *args, **kwargs ):
     kwargs[ 'file' ] = sys.stderr
     print( *args, **kwargs )
 
 def main():
-    incode      = sys.stdin.read()
-    characters  = Source( parse_characters( incode ) )
-    tokens      = Source( parse_tokens( characters ) )
-    definitions = Source( parse_definitions( tokens ) )
-    functions   = analyze_definitions( definitions )
-    outcode     = generate_code( functions )
+    
+    options, free = optparse.OptionParser().parse_args()
+    if len( free ) != 1:
+        raise Exception( 'usage: kmforth <path/to/file/to/compile>' )
+    
+    seen    = set()
+    pending = [ FileSource(
+        origin = '(main compilation target)' ,
+        cwd    = os.getcwd()                 ,
+        path   = free[0]                     ,
+    )]
+    
+    allFns  = {}
+    allDefs = []
+    while pending:
+        
+        pp = pending.pop()
+        
+        incode      = pp.read_source()
+        characters  = Source( parse_characters( incode ) )
+        tokens      = Source( parse_tokens( characters ) )
+        definitions = Source( parse_definitions( tokens = tokens, currentModule = pp ) )
+        
+        functions, includes = categorize_definitions( definitions )
+        
+        for fn in functions:
+            if functions[ fn ].name().value() in allFns:
+                raise Exception( 'duplicate function: %s' % repr( fn ) )
+            else:
+                allFns[ functions[ fn ].name().value() ] = functions[ fn ]
+        
+        for inc in includes:
+            norm = os.path.normpath( inc.path() )
+            if norm not in seen:
+                pending.append( inc )
+                seen.add( norm )
+    
+    functions = analyze_functions( allFns )
+    outcode   = generate_code( allFns )
     
     print( outcode )
+
+# keep, make - stdin later?
+class StdinSource:
+    def read_source(
+        self ,
+    ):
+        data = sys.stdin.read()
+        return data
+    
+    def cwd_for_includes( self ):
+        return os.getcwd()
+
+class FileSource:
+    def __init__(
+        self   ,
+        origin ,
+        cwd    ,
+        path   ,
+    ):
+        self._origin = origin
+        self._cwd    = cwd
+        self._path   = path
+        return
+    
+    def is_function( self ):
+        return False
+    
+    def is_include( self ):
+        return True
+    
+    def path(
+        self ,
+    ):
+        return os.path.join(
+            self._cwd  ,
+            self._path ,
+        )
+    
+    def cwd_for_includes(
+        self, 
+    ):
+        return os.path.dirname( self.path() )
+    
+    def read_source(
+        self ,
+    ):
+        try:
+            with open( self.path() ) as ff:
+                data = ff.read()
+                return data
+        except Exception as ee:
+            raise Exception( 'error reading path=%s %s: %s, %s' % (
+                repr( self._path )  ,
+                str( self._origin ) ,
+                str( type( ee ) )   ,
+                str( ee )           ,
+            ))
 
 class Source:
     def __init__(
@@ -101,6 +193,7 @@ class Token:
         )
 
 def parse_characters( data ):
+    
     assert isinstance( data, str )
     
     line   = 1
@@ -271,22 +364,33 @@ def extract_word( initial, characters ):
         value  = ''.join( bits )  ,
     )
 
-def parse_definitions( tokens ):
+def parse_definitions( tokens, currentModule ):
     while True:
-        dd = parse_definition( tokens )
+        dd = parse_clause( tokens, currentModule )
         if dd == None:
             return
         else:
             yield dd
 
-def parse_definition( tokens ):
+def parse_clause( tokens, currentModule ):
     initial = tokens.take()
     if not initial:
         return None
     elif initial.kind() == ':':
-        pass
+        return parse_definition(
+            initial = initial ,
+            tokens  = tokens  ,
+        )
+    elif initial.kind() == '@':
+        return parse_include(
+            initial       = initial       ,
+            tokens        = tokens        ,
+            currentModule = currentModule ,
+        )
     else:
         raise Exception( 'expected ":" at head of definition, found: %s:' % repr( initial ) )
+    
+def parse_definition( initial, tokens ):
     
     name = tokens.take()
     if not name:
@@ -357,6 +461,9 @@ class Definition:
         self._nlocals  = nlocals
         return
     
+    def is_function ( self ): return True
+    def is_include  ( self ): return False
+    
     def __repr__( self ):
         return '<Definition (%s:%s) name=%s command.cnt=%s>' % (
             repr( self._line            ),
@@ -371,20 +478,52 @@ class Definition:
     def commands ( self ): return self._commands
     def nlocals  ( self ): return self._nlocals
 
+def parse_include( initial, tokens, currentModule ):
+    path = tokens.take()
+    if path == None:
+        raise Exception( 'found nothing while expecting path after: %s' % repr( initial ) )
+    
+    if path.kind() != 'string':
+        raise Exception( 'expected path after @, found %s' % repr( path ) )
+    
+    end = tokens.take()
+    if end == None:
+        raise Exception( 'found nothing while expecting ";" after: %s' % repr( path ) )
+    
+    if end.kind() != ';':
+        raise Exception( 'expected ; after path, found %s' % repr( end ) )
+    
+    return FileSource(
+        origin = '(included from file=%s)' % currentModule.path() ,
+        cwd    = currentModule.cwd_for_includes()                 ,
+        path   = path.value()                                     ,
+    )
+
 #####
 
-def analyze_definitions( definitions ):
-    
+def categorize_definitions( definitions ):
     fns = {}
+    ins = {}
     while True:
         dd = definitions.take()
         if dd == None:
             break
-        elif dd.name().value() in fns:
-            raise Exception( 'duplicate function name: %s' % dd.name() )
-        else:
+        
+        if dd.is_function():
+            if dd.name().value() in fns:
+                raise Exception( 'duplicate function name: %s' % dd.name() )
             fns[ dd.name().value() ] = dd
+            
+        elif dd.is_include():
+            if dd.path() not in ins:
+                ins[ dd.path() ] = dd
+        
+        else:
+            raise Exception( 'unknown definition type: %s' % repr( dd ) )
     
+    return fns, list( ins.values() )
+
+def analyze_functions( fns ):
     for dd in fns.values():
         for cc in dd.commands():
             if cc.kind() == 'word':
@@ -459,6 +598,7 @@ def generate_code( functions ):
                 
             elif command.kind() == 'code':
                 code.append( '\n' )
+                code.append( '; including code literal\n' )
                 code.append( command.value() )
                 code.append( '\n' )
                 
@@ -473,6 +613,7 @@ def generate_code( functions ):
                 # convert \n into 10 here ( 10, 13 for windows, but fuck those guys
                 data.append( "    db %s\n" % asm_stringize( command.value() ) )
                 
+                code.append( '   ; pushing string literal %s\n' % repr( command.value() ) )
                 code.append( '   mov qword [r14], %s\n' % sn )
                 code.append( '   add r14, 8\n' )
                 

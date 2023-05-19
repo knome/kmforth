@@ -1,4 +1,10 @@
 
+# Why
+
+fun.
+
+# What
+
 It's forth, but not forth forth.
 
 The syntax is lightly different.
@@ -14,3 +20,13 @@ The stack value is a union of anything that fits in a 64 bit slot.
 There is no type checking.
 
 Good luck.
+
+# How
+
+``` bash
+./tools/compile src/Example.code
+```
+
+this will create `a.out`
+
+you will need `python3`, `nasm` and `ld` to compile code.

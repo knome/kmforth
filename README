@@ -1,0 +1,32 @@
+
+# structure
+
+// return-addr
+// local
+// local
+// local
+// return-addr
+// 
+union {
+  void * as_pointer ;
+  ...etc...
+} callstack [] ;
+
+struct {
+  void *   ret_addr               ;
+  uint64_t framesToPopToPrevFrame ;
+} callstack [] ;
+
+uint64_t callFrameLast ;
+
+uint64_t callFrameLocals ;
+
+union {
+  uint64_t as_u64              ;
+  in64_t   as_s64              ;
+  char     as_shortString[ 8 ] ;
+  void *   as_pointer          ;
+  ...etc...
+} datastack [] ;
+
+uint64_t dataFrameLast ;

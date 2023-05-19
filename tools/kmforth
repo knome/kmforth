@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+
+# everything is a lot easier if I give my callstack a little bit of state
+
+# how to set gdb to step through assembly
+# https://stackoverflow.com/questions/2420813/using-gdb-to-single-step-assembly-code-outside-specified-executable-causes-error
+
+import sys
+
+NUMBERS  = set( '0123456789' )
+LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz')
+
+WORDSTART = LETTERS.union( set('_') )
+WORDBITS  = LETTERS.union( NUMBERS ).union( '_-:' )
+
+STRUCTBITS = ':;[]{}'
+
+def log( *args, **kwargs ):
+    kwargs[ 'file' ] = sys.stderr
+    print( *args, **kwargs )
+
+def main():
+    incode      = sys.stdin.read()
+    characters  = Source( parse_characters( incode ) )
+    tokens      = Source( parse_tokens( characters ) )
+    definitions = Source( parse_definitions( tokens ) )
+    functions   = analyze_definitions( definitions )
+    outcode     = generate_code( functions )
+    
+    print( outcode )
+
+class Source:
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._iterator = iter( source )
+        self._pending  = None
+        self._done     = False
+    
+    def peek(
+        self ,
+    ):
+        if self._done:
+            return None
+        elif self._pending == None:
+            self._pending = next( self._iterator, None )
+            if self._pending == None:
+                self._done = True
+        
+        return self._pending
+    
+    def take(
+        self ,
+    ):
+        vv = self.peek()
+        self._pending = None
+        return vv
+
+class Character:
+    def __init__(
+        self      ,
+        line      ,
+        column    ,
+        character ,
+    ):
+        self._line      = line
+        self._column    = column
+        self._character = character
+        return
+    
+    def line      ( self ): return self._line
+    def column    ( self ): return self._column
+    def character ( self ): return self._character
+
+class Token:
+    def __init__(
+        self   ,
+        line   ,
+        column ,
+        kind   ,
+        value  ,
+    ):
+        self._line   = line
+        self._column = column
+        self._kind   = kind
+        self._value  = value
+        return
+    
+    def line   ( self ): return self._line
+    def column ( self ): return self._column
+    def kind   ( self ): return self._kind
+    def value  ( self ): return self._value
+    
+    def __repr__( self ):
+        return '<Token (%s:%s) kind=%s value=%s>' % (
+            repr( self._line   ),
+            repr( self._column ),
+            repr( self._kind   ),
+            repr( self._value  ),
+        )
+
+def parse_characters( data ):
+    assert isinstance( data, str )
+    
+    line   = 1
+    column = 0
+    
+    for cc in data:
+        yield Character(
+            line      = line   ,
+            column    = column ,
+            character = cc     ,
+        )
+        
+        if cc == "\n":
+            line += 1
+            column = 0
+        else:
+            column += 1
+
+def parse_tokens( characters ):
+    
+    while True:
+        nc = characters.take()
+        if not nc:
+            break
+        cc = nc.character()
+        
+        if cc == '#':
+            discard_comment( characters = characters )
+        
+        elif cc in ' \n\t':
+            discard_whitespace( characters = characters )
+        
+        elif cc == '"':
+            yield extract_string( initial = nc, characters = characters )
+            
+        elif cc == "`":
+            yield extract_code( initial = nc, characters = characters )
+        
+        elif cc == '-' or cc in NUMBERS:
+            yield extract_number( initial = nc, characters = characters )
+        
+        elif cc.lower() in WORDSTART:
+            yield extract_word( initial = nc, characters = characters )
+            
+        elif cc.lower() in STRUCTBITS:
+            yield Token(
+                line   = nc.line()   ,
+                column = nc.column() ,
+                kind   = cc.lower()  ,
+                value  = None        ,
+            )
+        
+        else:
+            raise Exception( 'unknown character: %s' % repr( cc ) )
+
+def discard_comment( characters ):
+    while True:
+        pc = characters.take()
+        if not pc:
+            break
+        elif pc.character() == '\n':
+            break
+    return
+
+def discard_whitespace( characters ):
+    while True:
+        pc = characters.peek()
+        if not pc:
+            break
+        elif pc.character() in ' \t\n':
+            characters.take()
+        else:
+            break
+    return
+
+def extract_string( initial, characters ):
+    bits = []
+    while True:
+        nc = characters.take()
+        if not nc:
+            raise Exception( 'unterminated string starting at: %s' % repr( initial ) )
+        cc = nc.character()
+        
+        if cc == '"':
+            break
+        elif cc == "\\":
+            raise Exception( 'string escapes not yet programmed in' )
+        else:
+            bits.append( cc )
+    
+    return Token(
+        line   = initial.line()   ,
+        column = initial.column() ,
+        kind   = 'string'         ,
+        value  = ''.join( bits )  ,
+    )
+
+def extract_code( initial, characters ):
+    bits = []
+    while True:
+        pc = characters.take()
+        if not pc:
+            raise Exception( 'unterminated code segment starting at: %s' % repr( initial ) )
+        cc = pc.character()
+        if cc == '`':
+            break
+        else:
+            bits.append( cc )
+    return Token(
+        line   = initial.line()   ,
+        column = initial.column() ,
+        kind   = 'code'           ,
+        value  = ''.join( bits )  ,
+    )
+
+def extract_word( initial, characters ):
+    bits = [ initial.character() ]
+    while True:
+        pc = characters.peek()
+        if not pc:
+            break
+        cc = pc.character()
+        if cc.lower() in WORDBITS:
+            characters.take()
+            bits.append( cc )
+        else:
+            break
+    return Token(
+        line   = initial.line()   ,
+        column = initial.column() ,
+        kind   = 'word'           ,
+        value  = ''.join( bits )  ,
+    )
+
+def parse_definitions( tokens ):
+    while True:
+        dd = parse_definition( tokens )
+        if dd == None:
+            return
+        else:
+            yield dd
+
+def parse_definition( tokens ):
+    initial = tokens.take()
+    if not initial:
+        return None
+    elif initial.kind() == ':':
+        pass
+    else:
+        raise Exception( 'expected ":" at head of definition, found: %s:' % repr( initial ) )
+    
+    name = tokens.take()
+    if not name:
+        raise Exception( 'expected name of definition after %s, found end of data' % repr( initial ) )
+    elif name.kind() == 'word':
+        pass
+    else:
+        raise Exception( 'expected name of definition after %s, found: %s' % ( repr( initial ), repr( name ) ) )
+    
+    nLocals = parse_optional_locals( tokens )
+    
+    commands = []
+    while True:
+        pt = tokens.take()
+        if not pt:
+            raise Exception( 'expected ";" at end of definition starting with %s' % repr( initial ) )
+        elif pt.kind() == ';':
+            break
+        else:
+            commands.append( pt )
+    
+    return Definition(
+        line     = initial.line()   ,
+        column   = initial.column() ,
+        name     = name             ,
+        commands = commands         ,
+        nlocals  = nLocals          ,
+    )
+
+def parse_optional_locals( tokens ):
+    pt = tokens.peek()
+    if not pt:
+        return 0
+    elif pt.kind() != '{':
+        return 0
+    
+    nn = tokens.take()
+    if not nn:
+        raise Exception( 'expected integer following: %s' % repr( pt ) )
+    elif nn.kind() != 'integer':
+        raise Exception( 'expected integer following: %s, found %s' % ( repr( pt ), repr( nn ) ) )
+    
+    if nn < 0:
+        raise Exception( 'frame cannot have fewer than 0 locals: %s' % repr( nn ) )
+    
+    ct = tokens.take()
+    if not ct:
+        raise Exception( 'expected } following: %s' % repr( pt ) )
+    elif ct.kind() != '}':
+        raise Exception( 'expected } following %s, found %s' % ( repr( pt ), repr( ct ) ) )
+    
+    return nn.value()
+
+class Definition:
+    
+    def __init__(
+        self     ,
+        line     ,
+        column   ,
+        name     ,
+        commands ,
+        nlocals  ,
+    ):
+        self._line     = line
+        self._column   = column
+        self._name     = name
+        self._commands = commands
+        self._nlocals  = nlocals
+        return
+    
+    def __repr__( self ):
+        return '<Definition (%s:%s) name=%s command.cnt=%s>' % (
+            repr( self._line            ),
+            repr( self._column          ),
+            repr( self._name            ),
+            repr( len( self._commands ) ),
+        )
+    
+    def line     ( self ): return self._line
+    def column   ( self ): return self._column
+    def name     ( self ): return self._name
+    def commands ( self ): return self._commands
+    def nlocals  ( self ): return self._nlocals
+
+#####
+
+def analyze_definitions( definitions ):
+    
+    fns = {}
+    while True:
+        dd = definitions.take()
+        if dd == None:
+            break
+        elif dd.name().value() in fns:
+            raise Exception( 'duplicate function name: %s' % dd.name() )
+        else:
+            fns[ dd.name().value() ] = dd
+    
+    for dd in fns.values():
+        for cc in dd.commands():
+            if cc.kind() == 'word':
+                if cc.value() not in fns:
+                    raise Exception( 'unknown function in %s: %s' % ( repr( dd ), repr( cc ) ) )
+            elif cc.kind() == 'string':
+                pass
+            elif cc.kind() == 'code':
+                pass
+            else:
+                raise Exception( 'wat' )
+    
+    return fns
+
+#####
+
+# returnindex + 1
+# newframe = stack + sizeof( returnframe = 16) * returnindex
+# newframe[0] = fn_0
+# newframe[1] = 0
+# goto command
+
+def generate_code( functions ):
+    
+    staticStrings = set()
+    
+    pre  = []
+    data = []
+    code = []
+    
+    nns = 0
+    
+    pre.append( '%define KM__MMAP__MAP_PRIVATE 0x2\n' )
+    pre.append( '%define KM__MMAP__MAP_ANONYMOUS 0x20\n' )
+    
+    pre.append( '%define KM__MMAP__PROT_READ  0x1\n' )
+    pre.append( '%define KM__MMAP__PROT_WRITE 0x2\n' )
+    pre.append( '%define KM__MMAP__PROT_EXEC  0x3\n' )
+    
+    data.append( 'section .data\n' )
+    data.append( '\n' )
+    
+    code.append( 'section .text\n' )
+    
+    code.append( 'global _start\n')
+    code.append( '_start:\n' )
+    code.append( '    jmp kmf__start\n' )
+    code.append( '\n')
+    
+    nn = 0
+    for fn in functions:
+        code.append( '\n' )
+        code.append( '  kmf_' + fn + ':\n' )
+        
+        if functions[ fn ].nlocals():
+            code.append( '  ; make space for any locals\n' )
+            code.append( '  add r15, %d\n' % functions[ fn ].nlocals() * 8 )
+        
+        for command in functions[ fn ].commands():
+            
+            if command.kind() == 'word':
+                rt = 'kmf_' + fn + '_' + str( nn )
+                nn = nn + 1
+                
+                code.append( '    ; calling %s\n' % command.value() )
+                code.append( '    mov qword [r15], %s\n' % rt )
+                code.append( '    add r15, 8\n' )
+                code.append( '    jmp kmf_' + command.value() + '\n' )
+                code.append( '  %s:\n' % rt )
+                
+            elif command.kind() == 'code':
+                code.append( '\n' )
+                code.append( command.value() )
+                code.append( '\n' )
+                
+            elif command.kind() == 'string':
+                
+                if "'" in command.value():
+                    raise Exception( 'need a more robust implementation' )
+                
+                sn = "km_c_" + str(nns)
+                nns += 1
+                data.append( '  ' + sn + ':\n' )
+                data.append( "    db '" + command.value() + "', 0\n" );
+                
+                code.append( '   mov qword [r14], %s\n' % sn )
+                code.append( '   add r14, 8\n' )
+            else:
+                raise Exception( 'wat %s %s' % ( str( command.kind() ), repr( command.value() ) ) )
+        
+        if functions[ fn ].nlocals():
+            code.append( '    ; pop any locals\n' )
+            code.append( '    sub r15, %d\n' % functions[ fn ].nlocals() * 8 )
+            
+        code.append( '    sub r15, 8\n' )
+        code.append( '    jmp [r15]\n' )
+        
+    return '\n'.join( [''.join(pre), ''.join( data ), ''.join( code ) ] )
+    
+#####
+
+if __name__ == '__main__':
+    main()

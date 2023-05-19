@@ -1,0 +1,115 @@
+
+# The kernel interface uses %rdi, %rsi, %rdx, %r10, %r8 and %r9.
+
+# PROT_NONE            0x0
+# PROT_READ            0x1
+# PROT_WRITE           0x2
+# PROT_EXEC            0x4
+# PROT_GROWSDOWN 0x1000000
+
+# MAP_SHARED          0x01
+# MAP_PRIVATE         0x02
+# MAP_SHARED_VALIDATE 0x03 # don't use
+# MAP_TYPE            0x0f # don't use
+
+# MAP_FIXED     0x10 # ( replace mappings, map to specific location? )
+# MAP_ANONYMOUS 0x20 # no file required
+
+:_start
+  `
+  
+  ;;; setup the data-stack
+  
+  mov rdi, 0         ; desired mapping address
+  mov rsi, 0x1000000 ; desired mapping size
+  mov rdx, 0x1|0x2   ; read/write
+  mov r10, 0x02|0x20 ; private/anonymous
+  mov r8,  -1        ; open file descriptor to map
+  mov r9,  0         ; desired mapping offset
+  mov rax, 9         ; syscall number
+  syscall
+  
+  test rax,rax ; test return-register against itself
+  js .0        ; jump if it is signed ( negative )
+  
+  test rax,-1 ; is it the magic nope zone?
+  je .0
+  
+  mov r14, rax ; r14 is the permanent home of the datastack pointer, which always points to the next free slot
+  
+  ;;; setup the call-stack
+  
+  mov rdi, 0         ; desired mapping address
+  mov rsi, 0x1000000 ; desired mapping size
+  mov rdx, 0x1|0x2   ; read/write
+  mov r10, 0x2|0x20  ; private/anonymous
+  mov r8,  -1        ; open file descriptor to map
+  mov r9,  0         ; desired mapping offset
+  mov rax, 9         ; syscall number
+  syscall
+  
+  test rax,rax ; test return-register against itself
+  js .0        ; jump if it is signed ( negative )
+  
+  test rax,-1 ; is it the magic nope zone?
+  je .0
+  
+  mov r15, rax        ; r15 is the permanent home of the callstack pointer, which always points to the next free slot
+  mov qword [r15], .1 ; if the bottom from gets accidentally popped, we should show a message to the user indicating it
+  add r15, 8          ; bump the pointer to the next slot
+  
+  ;;; success, jump to end of code
+  jmp .end
+  
+  ;;; exit with error
+  
+  .0:
+  mov rdi, 1  ; exit code
+  mov rax, 60 ; syscall number
+  syscall
+  
+  ;;; exit due to returning from last frame
+  
+  .1:
+  mov rdi, 2  ; exit code
+  mov rax, 60 ; syscall number
+  syscall
+  
+  .end:
+  `
+  main
+  ;
+
+:main
+  "hello world" 
+  cStrLen
+  # dup
+  # stringLen
+  # writeString
+  ;
+
+:cStrLen
+  `
+  sub r14, 8             ; pop the pointer to the string
+  mov rax, [r14]         ; 
+  mov rbx, 0             ; we'll track the length here
+  
+ .next:
+  mov ch, byte [rax+rbx] ; grab the next character in the string
+  test ch, ch            ; see if it is 0
+  jz .done               ; if its nul, we're at the end, jump
+  inc rbx                ; otherwise bump our counter
+  jmp .next              ; and loop
+ .done:
+  mov [r14], rbx         ; push the string length onto the stack
+  add r14, 8             ; 
+  `
+  ;
+
+:dup
+  `
+  mov rax, [r14-8] ; push whatever is on the top again
+  mov [r14], rax  
+  add r14, 8
+  `
+  ;

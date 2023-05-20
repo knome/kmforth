@@ -1,83 +1,5 @@
 
-# The kernel interface uses %rdi, %rsi, %rdx, %r10, %r8 and %r9.
-
-# PROT_NONE            0x0
-# PROT_READ            0x1
-# PROT_WRITE           0x2
-# PROT_EXEC            0x4
-# PROT_GROWSDOWN 0x1000000
-
-# MAP_SHARED          0x01
-# MAP_PRIVATE         0x02
-# MAP_SHARED_VALIDATE 0x03 # don't use
-# MAP_TYPE            0x0f # don't use
-
-# MAP_FIXED     0x10 # ( replace mappings, map to specific location? )
-# MAP_ANONYMOUS 0x20 # no file required
-
-:_start
-  `
-  ;;; setup the data-stack
-  
-  mov rdi, 0         ; desired mapping address
-  mov rsi, 0x1000000 ; desired mapping size
-  mov rdx, 0x1|0x2   ; read/write
-  mov r10, 0x02|0x20 ; private/anonymous
-  mov r8,  -1        ; open file descriptor to map
-  mov r9,  0         ; desired mapping offset
-  mov rax, 9         ; syscall number
-  syscall
-  
-  test rax,rax ; test return-register against itself
-  js .0        ; jump if it is signed ( negative )
-  
-  test rax,-1 ; is it the magic nope zone?
-  je .0
-  
-  mov r14, rax ; r14 is the permanent home of the datastack pointer, which always points to the next free slot
-  
-  ;;; setup the call-stack
-  
-  mov rdi, 0         ; desired mapping address
-  mov rsi, 0x1000000 ; desired mapping size
-  mov rdx, 0x1|0x2   ; read/write
-  mov r10, 0x2|0x20  ; private/anonymous
-  mov r8,  -1        ; open file descriptor to map
-  mov r9,  0         ; desired mapping offset
-  mov rax, 9         ; syscall number
-  syscall
-  
-  test rax,rax ; test return-register against itself
-  js .0        ; jump if it is signed ( negative )
-  
-  test rax,-1 ; is it the magic nope zone?
-  je .0
-  
-  mov r15, rax        ; r15 is the permanent home of the callstack pointer, which always points to the next free slot
-  mov qword [r15], .1 ; if the bottom from gets accidentally popped, we should show a message to the user indicating it
-  add r15, 8          ; bump the pointer to the next slot
-  
-  ;;; success, jump to end of code
-  jmp .end
-  
-  ;;; exit with error
-  
-  .0:
-  mov rdi, 1  ; exit code
-  mov rax, 60 ; syscall number
-  syscall
-  
-  ;;; exit due to returning from last frame
-  
-  .1:
-  mov rdi, 2  ; exit code
-  mov rax, 60 ; syscall number
-  syscall
-  
-  .end:
-  `
-  main
-  ;
+@ "AMD64" ;
 
 :write
        dup cStrLen 1 cWrite
@@ -94,61 +16,59 @@
   1 exit
   ;
 
-:cStrLen
-  `
-  sub r14, 8             ; pop the pointer to the string
-  mov rax, [r14]         ; 
-  mov rbx, 0             ; we'll track the length here
-  
- .next:
-  mov ch, byte [rax+rbx] ; grab the next character in the string
-  test ch, ch            ; see if it is 0
-  jz .done               ; if its nul, we're at the end, jump
-  inc rbx                ; otherwise bump our counter
-  jmp .next              ; and loop
- .done:
-  mov [r14], rbx         ; push the string length onto the stack
-  add r14, 8             ; 
-  `
+:loop { $todo $loop }
+  $todo.set
+  $loop.here
+  $todo.get
+  call
+  $loop.get
+  1
+  $.jumpIf
   ;
 
-:dup
-  `
-  mov rax, [r14-8] ; push whatever is on the top again
-  mov [r14], rax  
-  add r14, 8
-  `
-  ;
+# (todo cond)
+:while { $test $todo $retry $condRet }
+  $test.set    # pop stack into test local
+  $todo.set    # pop stack into todo local
+  
+  $retry.here  # push address following command into local
+  
+  $test.get    # push and call the cond func
+  call
+  
+  dup          # dups its return value
+  $condRet.set # pop the copy into condret
+  
+  $todo.get    # push the todo and call it if return was truthy
+  swap         # the todo and test value are reversed on the top of the stack
+  $.callIf     # ( consumes ret and leave datastack clean for called function )
+  
+  $retry.get   # push the retry address
+  $condRet.get # push the return value back onto the stack
+  $.jumpIf     # pops both, jumps to the address if condret was true
+  
+  # otherwise we end up here with a clean datastack ( excepting what cond/todo may have pushed
+  # we can just ignore callstack locals and just walk back past them
+  # done
+;
 
-:cWrite
-  `
-  ;; I am aware I am ignoring the possibility of failed or partial writes here
+# [: todo times
+:repeat { $times $todo $loop }
+  $times.set  # [: todo
+  $todo.set   # [: 
+  $loop.here  # [: 
   
-  sub r14, 8     ; pop fd into rdi
-  mov rdi, [r14] ;
-  sub r14, 8     ; pop string length into rdx
-  mov rdx, [r14] ;
-  sub r14, 8     ; pop string pointer into rsi
-  mov rsi, [r14] ; 
-  mov rax, 1     ; read syscall
-  syscall
+  $times.get  # [: times
+  dup         # [: times times
+  decr        # [: times (times-1)
+  $times.set  # [: times
+  not         # [: !times
+  $.leaveIf   # [: 
   
-  test rax,rax
-  jns .good      ; jump to good if not signed ( negative = error )
+  $todo.get   # [: todo
+  call        # [: 
   
-  mov rdi, 3     ; exit-code 3 = bad write ( including retry for now )
-  mov rax, 60    ;
-  syscall
-  
- .good:
-  `
-  ;
-
-:exit
-  `
-  sub r14, 8     ; pop exit code into rdi
-  mov rdi, [r14] ;
-  mov rax, 60    ; exit syscall
-  syscall
-  `
+  $loop.get   # [: loop
+  1           # [: loop 1
+  $.jumpIf    # [: 
   ;

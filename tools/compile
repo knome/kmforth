@@ -2,7 +2,10 @@
 log(){ >&2 echo "$@" ; }
 die(){ log "$@" ; exit 1 ; }
 
-TARGET="$1"
+case "$1" in
+    -) TARGET="/dev/stdin" ;;
+    *) TARGET="$1" ;;
+esac
 
 # for some reason dwarf debugging stopped working with newer gdb
 

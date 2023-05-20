@@ -1,8 +1,6 @@
 
-@"STANDARD";
+@ "STANDARD" ;
 
-:main
-  "hello, world!" dup dup
-  write write write
-  "narp" panic
-  ;
+# :main [ "hello world" [[write] call] call ] loop ;
+
+:main [ "hello world" write ] 10 repeat ;

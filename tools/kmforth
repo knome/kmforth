@@ -10,10 +10,10 @@ import os
 import optparse
 
 NUMBERS  = set( '0123456789' )
-LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz')
+LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz' )
 
 WORDSTART = LETTERS.union( set('_') )
-WORDBITS  = LETTERS.union( NUMBERS ).union( '_-:' )
+WORDBITS  = LETTERS.union( NUMBERS ).union( '_-.' )
 
 STRUCTBITS = ':;[]{}@'
 
@@ -41,8 +41,8 @@ def main():
         pp = pending.pop()
         
         incode      = pp.read_source()
-        characters  = Source( parse_characters( incode ) )
-        tokens      = Source( parse_tokens( characters ) )
+        characters  = Source( parse_characters( data = incode, fileno = pp.fileno() ) )
+        tokens      = Source( parse_tokens( characters = characters ) )
         definitions = Source( parse_definitions( tokens = tokens, currentModule = pp ) )
         
         functions, includes = categorize_definitions( definitions )
@@ -64,28 +64,26 @@ def main():
     
     print( outcode )
 
-# keep, make - stdin later?
-class StdinSource:
-    def read_source(
-        self ,
-    ):
-        data = sys.stdin.read()
-        return data
-    
-    def cwd_for_includes( self ):
-        return os.getcwd()
-
 class FileSource:
+    
+    NN = 0
+    
     def __init__(
         self   ,
         origin ,
         cwd    ,
         path   ,
     ):
+        self._fileno = self.NN
+        self.NN += 1
+        
         self._origin = origin
         self._cwd    = cwd
         self._path   = path
         return
+    
+    def fileno( self ):
+        return self._fileno
     
     def is_function( self ):
         return False
@@ -152,15 +150,18 @@ class Source:
 class Character:
     def __init__(
         self      ,
+        fileno    ,
         line      ,
         column    ,
         character ,
     ):
+        self._fileno    = fileno
         self._line      = line
         self._column    = column
         self._character = character
         return
     
+    def fileno    ( self ): return self._fileno
     def line      ( self ): return self._line
     def column    ( self ): return self._column
     def character ( self ): return self._character
@@ -168,17 +169,20 @@ class Character:
 class Token:
     def __init__(
         self   ,
+        fileno ,
         line   ,
         column ,
         kind   ,
         value  ,
     ):
+        self._fileno = fileno
         self._line   = line
         self._column = column
         self._kind   = kind
         self._value  = value
         return
     
+    def fileno ( self ): return self._fileno
     def line   ( self ): return self._line
     def column ( self ): return self._column
     def kind   ( self ): return self._kind
@@ -192,8 +196,7 @@ class Token:
             repr( self._value  ),
         )
 
-def parse_characters( data ):
-    
+def parse_characters( data, fileno ):
     assert isinstance( data, str )
     
     line   = 1
@@ -201,6 +204,7 @@ def parse_characters( data ):
     
     for cc in data:
         yield Character(
+            fileno    = fileno ,
             line      = line   ,
             column    = column ,
             character = cc     ,
@@ -235,11 +239,12 @@ def parse_tokens( characters ):
         elif cc == '-' or cc in NUMBERS:
             yield extract_number( initial = nc, characters = characters )
         
-        elif cc.lower() in WORDSTART:
+        elif cc.lower() in WORDSTART or cc == '$' or cc == '&':
             yield extract_word( initial = nc, characters = characters )
             
         elif cc.lower() in STRUCTBITS:
             yield Token(
+                fileno = nc.fileno() ,
                 line   = nc.line()   ,
                 column = nc.column() ,
                 kind   = cc.lower()  ,
@@ -299,6 +304,7 @@ def extract_string( initial, characters ):
                 continue
     
     return Token(
+        fileno = initial.fileno()  ,
         line   = initial.line()   ,
         column = initial.column() ,
         kind   = 'string'         ,
@@ -308,7 +314,7 @@ def extract_string( initial, characters ):
 def extract_number( initial, characters ):
     bits = [ initial.character() ]
     while True:
-        pc = characters.take()
+        pc = characters.peek()
         if not pc:
             break
         cc = pc.character()
@@ -321,6 +327,7 @@ def extract_number( initial, characters ):
     if '.' in bits:
         raise Exception( 'float not currently handled' )
     return Token(
+        fileno  = initial.fileno() ,
         line    = initial.line()   ,
         column  = initial.column() ,
         kind    = 'integer'        ,
@@ -339,6 +346,7 @@ def extract_code( initial, characters ):
         else:
             bits.append( cc )
     return Token(
+        fileno = initial.fileno() ,
         line   = initial.line()   ,
         column = initial.column() ,
         kind   = 'code'           ,
@@ -357,11 +365,22 @@ def extract_word( initial, characters ):
             bits.append( cc )
         else:
             break
+    if initial.character() == '$':
+        kind  = 'localfn'
+        value = ''.join(bits)
+    elif initial.character() == '&':
+        kind  = 'fnref'
+        value = ''.join(bits)[1:]
+    else:
+        kind  = 'word'
+        value = ''.join(bits)
+        
     return Token(
+        fileno = initial.fileno() ,
         line   = initial.line()   ,
         column = initial.column() ,
-        kind   = 'word'           ,
-        value  = ''.join( bits )  ,
+        kind   = kind             ,
+        value  = value            ,
     )
 
 def parse_definitions( tokens, currentModule ):
@@ -377,7 +396,7 @@ def parse_clause( tokens, currentModule ):
     if not initial:
         return None
     elif initial.kind() == ':':
-        return parse_definition(
+        return parse_named_function(
             initial = initial ,
             tokens  = tokens  ,
         )
@@ -389,8 +408,8 @@ def parse_clause( tokens, currentModule ):
         )
     else:
         raise Exception( 'expected ":" at head of definition, found: %s:' % repr( initial ) )
-    
-def parse_definition( initial, tokens ):
+
+def parse_named_function( initial, tokens ):
     
     name = tokens.take()
     if not name:
@@ -400,41 +419,137 @@ def parse_definition( initial, tokens ):
     else:
         raise Exception( 'expected name of definition after %s, found: %s' % ( repr( initial ), repr( name ) ) )
     
-    nLocals = parse_optional_locals( tokens )
+    body = parse_body( initial, tokens )
+    
+    ct = tokens.take()
+    if ct == None:
+        raise Exception( 'expected ";" after %s' % repr( initial ) )
+    elif ct.kind() != ';':
+        raise Exception( 'expected ";" after %s, found %s' % ( repr( initial ), repr( ct ) ) )
+    
+    return NamedFunction(
+        fileno = initial.fileno() ,
+        line   = initial.line()   ,
+        column = initial.column() ,
+        name   = name             ,
+        body   = body             ,
+    )
+
+def parse_lambda_definition( initial, tokens ):
+    body = parse_body( initial, tokens )
+    return LambdaFunction(
+        fileno = initial.fileno() ,
+        line   = initial.line()   ,
+        column = initial.column() ,
+        body   = body             ,
+    )
+
+def parse_body( initial, tokens ):
+    
+    localfns = parse_optional_locals( tokens )
     
     commands = []
+    subfns   = []
     while True:
-        pt = tokens.take()
+        pt = tokens.peek()
         if not pt:
-            raise Exception( 'expected ";" at end of definition starting with %s' % repr( initial ) )
+            break
         elif pt.kind() == ';':
             break
-        else:
+        elif pt.kind() == ']':
+            break
+        elif pt.kind() == '[':
+            tokens.take()
+            subfntoks = []
+            depth = 0
+            while True:
+                st = tokens.take()
+                if st == None:
+                    raise Exception( 'expected "]" following unclosed %s' % repr( pt ) )
+                elif st.kind() == ']':
+                    if depth == 0:
+                        break
+                    else:
+                        depth -= 1
+                        subfntoks.append( st )
+                elif st.kind() == '[':
+                    depth += 1
+                    subfntoks.append( st )
+                else:
+                    subfntoks.append( st )
+            subfn = parse_lambda_definition(
+                initial = pt                  ,
+                tokens  = Source( subfntoks ) ,
+            )
+            subfns.append( subfn )
+            commands.append( Token(
+                fileno = subfn.fileno()       ,
+                line   = subfn.line()         ,
+                column = subfn.column()       ,
+                kind   = 'subfn'              ,
+                value  = subfn.name().value() ,
+            ))
+        elif pt.kind() == 'word':
+            tokens.take()
+            commands.append( Token(
+                fileno = pt.fileno()          ,
+                line   = pt.line()            ,
+                column = pt.column()          ,
+                kind   = 'word'               ,
+                value  = 'kmfn_' + pt.value() ,
+            ))
+        elif pt.kind() == 'fnref':
+            tokens.take()
+            commands.append( Token(
+                fileno = pt.fileno()          ,
+                line   = pt.line()            ,
+                column = pt.column()          ,
+                kind   = 'fnref'              ,
+                value  = 'kmfn_' + pt.value() ,
+            ))
+        
+        elif pt.kind() in [ 'localfn', 'string', 'integer', 'code' ]:
+            tokens.take()
             commands.append( pt )
+        else:
+            raise Exception( 'what is %s' % repr( pt ) )
     
-    return Definition(
+    return Body(
+        fileno   = initial.fileno() ,
         line     = initial.line()   ,
         column   = initial.column() ,
-        name     = name             ,
         commands = commands         ,
-        nlocals  = nLocals          ,
+        localfns = localfns         ,
+        subfns   = subfns           ,
     )
 
 def parse_optional_locals( tokens ):
     pt = tokens.peek()
     if not pt:
-        return 0
+        return []
     elif pt.kind() != '{':
-        return 0
+        return []
+    else:
+        tokens.take()
     
-    nn = tokens.take()
-    if not nn:
-        raise Exception( 'expected integer following: %s' % repr( pt ) )
-    elif nn.kind() != 'integer':
-        raise Exception( 'expected integer following: %s, found %s' % ( repr( pt ), repr( nn ) ) )
+    seen       = set()
+    localNames = []
     
-    if nn < 0:
-        raise Exception( 'frame cannot have fewer than 0 locals: %s' % repr( nn ) )
+    while True:
+        pt = tokens.peek()
+        if pt == None:
+            break
+        elif pt.kind() != 'localfn':
+            break
+        else:
+            tokens.take()
+            if '.' in pt.value():
+                raise Exception( 'localfn name declarations cannot include a period (.): %s' % repr( pt ) )
+            elif pt.value() in seen:
+                raise Exception( 'duplicate localfn name declaration: %s' % repr( pt ) )
+            else:
+                seen.add( pt.value() )
+                localNames.append( pt.value() )
     
     ct = tokens.take()
     if not ct:
@@ -442,41 +557,134 @@ def parse_optional_locals( tokens ):
     elif ct.kind() != '}':
         raise Exception( 'expected } following %s, found %s' % ( repr( pt ), repr( ct ) ) )
     
-    return nn.value()
+    return localNames
 
-class Definition:
+class NamedFunction:
+    def __init__(
+        self   ,
+        fileno ,
+        line   ,
+        column ,
+        name   ,
+        body   ,
+    ):
+        self._fileno = fileno
+        self._line   = line
+        self._column = column
+        self._name   = name
+        self._body   = body
+        return
+    
+    def __repr__( self ):
+        return '<NamedFunction name=%s commands=%s>' % (
+            repr( self._name.value() ) ,
+            repr( len( self._body.commands() ) ) ,
+        )
+    
+    def is_function( self ): return True
+    
+    def fileno ( self ): return self._fileno
+    def line   ( self ): return self._line
+    def column ( self ): return self._column
+    def body   ( self ): return self._body
+    
+    def name( self ):
+        return Token(
+            fileno = self._name.fileno()          ,
+            line   = self._name.line()            ,
+            column = self._name.column()          ,
+            kind   = 'word'                       ,
+            value  = 'kmfn_' + self._name.value() ,
+        )
+
+class LambdaFunction:
+    def __init__(
+        self   ,
+        fileno ,
+        line   ,
+        column ,
+        body   ,
+    ):
+        self._fileno = fileno
+        self._line   = line
+        self._column = column
+        self._body   = body
+        return
+    
+    def __repr__( self ):
+        return '<LambdaFunction (%d:%d:%d) commands=%d>' % (
+            self._fileno                 ,
+            self._line                   ,
+            self._column                 ,
+            len( self._body.commands() ) ,
+        )
+    
+    def fileno ( self ): return self._fileno
+    def line   ( self ): return self._line
+    def column ( self ): return self._column
+    def body   ( self ): return self._body
+    
+    def name( self ):
+        return Token(
+            fileno = self._fileno ,
+            line   = self._line   ,
+            column = self._column ,
+            kind   = 'word'       ,
+            value  = 'kmlambda_%s_%s_%s' % (
+                str( self._fileno ),
+                str( self._line   ),
+                str( self._column ),
+            ),
+        )
+
+class Body:
     
     def __init__(
         self     ,
+        fileno   ,
         line     ,
         column   ,
-        name     ,
         commands ,
-        nlocals  ,
+        localfns ,
+        subfns   ,
     ):
+        self._fileno   = fileno
         self._line     = line
         self._column   = column
-        self._name     = name
         self._commands = commands
-        self._nlocals  = nlocals
+        self._localfns = localfns
+        self._subfns   = subfns
         return
     
     def is_function ( self ): return True
     def is_include  ( self ): return False
     
     def __repr__( self ):
-        return '<Definition (%s:%s) name=%s command.cnt=%s>' % (
+        return '<Definition (%s:%s) command.cnt=%s>' % (
             repr( self._line            ),
             repr( self._column          ),
-            repr( self._name            ),
             repr( len( self._commands ) ),
         )
     
+    def fileno   ( self ): return self._fileno
     def line     ( self ): return self._line
     def column   ( self ): return self._column
-    def name     ( self ): return self._name
     def commands ( self ): return self._commands
-    def nlocals  ( self ): return self._nlocals
+    def nlocals  ( self ): return len( self._localfns )
+    def localfns ( self ): return self._localfns
+        
+    def subfns( self ):
+        return self._subfns
+    
+    def get_localfn_slotno(
+        self ,
+        name ,
+    ):
+        try:
+            return self._localfns.index( name )
+        except ValueError:
+            # item not found
+            return None
 
 def parse_include( initial, tokens, currentModule ):
     path = tokens.take()
@@ -510,10 +718,16 @@ def categorize_definitions( definitions ):
             break
         
         if dd.is_function():
-            if dd.name().value() in fns:
-                raise Exception( 'duplicate function name: %s' % dd.name() )
-            fns[ dd.name().value() ] = dd
-            
+            pending = [ dd ]
+            while pending:
+                nn = pending.pop(0)
+                if nn.name().value() in fns:
+                    raise Exception( 'duplicate function name: %s' % nn.name() )
+                fns[ nn.name().value() ] = nn
+                
+                for subfn in nn.body().subfns():
+                    pending.append( subfn )
+        
         elif dd.is_include():
             if dd.path() not in ins:
                 ins[ dd.path() ] = dd
@@ -525,9 +739,9 @@ def categorize_definitions( definitions ):
 
 def analyze_functions( fns ):
     for dd in fns.values():
-        for cc in dd.commands():
+        for cc in dd.body().commands():
             if cc.kind() == 'word':
-                if cc.value() not in fns:
+                if (cc.value()) not in fns:
                     raise Exception( 'unknown function in %s: %s' % ( repr( dd ), repr( cc ) ) )
             elif cc.kind() == 'string':
                 pass
@@ -535,8 +749,16 @@ def analyze_functions( fns ):
                 pass
             elif cc.kind() == 'integer':
                 pass
+            elif cc.kind() == 'localfn':
+                pass
+            elif cc.kind() == 'fnref':
+                if cc.value() not in fns:
+                    raise Exception( 'unknown function in %s: %s' % ( repr( dd ), repr( cc ) ) )
+            elif cc.kind() == 'subfn':
+                if cc.value() not in fns:
+                    raise Exception( 'missing lambda in %s: %s' % ( repr( dd ), repr( cc ) ) )
             else:
-                raise Exception( 'wat' )
+                raise Exception( 'unexpected command form: %s' % repr( cc ) )
     
     return fns
 
@@ -555,15 +777,14 @@ def generate_code( functions ):
     pre  = []
     data = []
     code = []
+    bss  = []
     
     nns = 0
     
-    pre.append( '%define KM__MMAP__MAP_PRIVATE 0x2\n' )
-    pre.append( '%define KM__MMAP__MAP_ANONYMOUS 0x20\n' )
-    
-    pre.append( '%define KM__MMAP__PROT_READ  0x1\n' )
-    pre.append( '%define KM__MMAP__PROT_WRITE 0x2\n' )
-    pre.append( '%define KM__MMAP__PROT_EXEC  0x3\n' )
+    bss.append( 'section .bss\n' )
+    bss.append( 'datastack: resq 1\n' )
+    bss.append( 'callstack: resq 1\n' )
+    bss.append( '\n' )
     
     data.append( 'section .data\n' )
     data.append( '\n' )
@@ -572,28 +793,28 @@ def generate_code( functions ):
     
     code.append( 'global _start\n')
     code.append( '_start:\n' )
-    code.append( '    jmp kmf__start\n' )
+    code.append( '    jmp kmfn__start\n' )
     code.append( '\n')
     
     nn = 0
     for fn in functions:
         code.append( '\n' )
-        code.append( '  kmf_' + fn + ':\n' )
+        code.append( '  ' + fn + ':\n' )
         
-        if functions[ fn ].nlocals():
+        if functions[ fn ].body().nlocals():
             code.append( '  ; make space for any locals\n' )
-            code.append( '  add r15, %d\n' % functions[ fn ].nlocals() * 8 )
+            code.append( '  add r15, %d\n' % ( functions[ fn ].body().nlocals() * 8 ) )
         
-        for command in functions[ fn ].commands():
+        for command in functions[ fn ].body().commands():
             
             if command.kind() == 'word':
-                rt = 'kmf_' + fn + '_' + str( nn )
+                rt = fn + '_' + str( nn )
                 nn = nn + 1
                 
                 code.append( '    ; calling %s\n' % command.value() )
                 code.append( '    mov qword [r15], %s\n' % rt )
                 code.append( '    add r15, 8\n' )
-                code.append( '    jmp kmf_' + command.value() + '\n' )
+                code.append( '    jmp ' + command.value() + '\n' )
                 code.append( '  %s:\n' % rt )
                 
             elif command.kind() == 'code':
@@ -620,18 +841,98 @@ def generate_code( functions ):
             elif command.kind() == 'integer':
                 code.append( '   mov qword [r14], %s\n' % command.value() )
                 code.append( '   add r14, 8\n' )
+            
+            elif command.kind() == 'localfn':
+                if command.value().startswith('$.'):
+                    builtin = command.value()
+                    if builtin == '$.callIf':
+                        label = '.km_nocall_' + str(nns)
+                        nns += 1
+                        code.append( '    ; callIf localfn\n' )
+                        code.append( '    sub r14, 8\n' )
+                        code.append( '    mov rax, [r14]\n' )
+                        code.append( '    sub r14, 8\n' )
+                        code.append( '    mov rbx, [r14]\n' )
+                        code.append( '    test rax,rax\n' )
+                        code.append( '    jz %s\n' % label )
+                        code.append( '    mov qword [r15], %s\n' % label )
+                        code.append( '    add r15, 8\n' )
+                        code.append( '    jmp rbx\n' )
+                        code.append( '   %s:\n' % label )
+                    elif builtin == '$.jumpIf':
+                        label = '.km_nojump_' + str(nns)
+                        nns += 1
+                        code.append( '    ; jumpIf \n' )
+                        code.append( '    sub r14, 8\n' )
+                        code.append( '    mov rax, [r14]\n' )
+                        code.append( '    sub r14, 8\n' )
+                        code.append( '    mov rbx, [r14]\n' )
+                        code.append( '    test rax,rax\n' )
+                        code.append( '    jz %s\n' % label )
+                        code.append( '    jmp rbx\n' )
+                        code.append( '   %s:\n' % label )
+                    elif builtin == '$.leaveIf':
+                        label = '.km_noleave_' + str(nns)
+                        nns += 1
+                        code.append( '    ; leaveIf\n' )
+                        code.append( '    sub r14, 8\n' )
+                        code.append( '    mov rax, [r14]\n' )
+                        code.append( '    test rax,rax\n' )
+                        code.append( '    jz %s\n' % label )
+                        if functions[ fn ].body().nlocals():
+                            code.append( '    ; (popping locals before leaving)\n' )
+                            code.append( '    sub r15, %d\n' % ( functions[fn].body().nlocals() * 8 ) )
+                        code.append( '    sub r15, 8\n' )
+                        code.append( '    jmp [r15]\n' )
+                        code.append( '   %s:\n' % label )
+                    else:
+                        raise Exception( 'unknown builtin localfn: %s' % repr( command.value() ) )
+                else:
+                    # locals getters and setters
+                    localName, memberfn = command.value().split('.',1)
+                    slotno = functions[ fn ].body().get_localfn_slotno( localName )
+                    if slotno == None:
+                        raise Exception( 'failed to find local %s in function %s' % ( repr( localName ), repr( fn ) ) )
+                    if memberfn == 'get':
+                        code.append( '    ; push local (%s) to datastack\n' % repr( localName ) )
+                        code.append( '    mov rax, [r15-8*%d]\n' % (slotno+1) )
+                        code.append( '    mov qword [r14], rax\n' )
+                        code.append( '    add r14, 8\n' )
+                    elif memberfn == 'set':
+                        code.append( '    ; pop datastack storing to local (%s)\n' % ( repr( localName ) ) )
+                        code.append( '    sub r14, 8\n' )
+                        code.append( '    mov rax, [r14]\n' )
+                        code.append( '    mov qword [r15-8*%d], rax\n' % (slotno+1) )
+                    elif memberfn == 'here':
+                        label = 'km_here_' + str(nns)
+                        nns += 1
+                        code.append( '    ; set local to label following this command\n' )
+                        code.append( '    mov qword [r15-8*%d], %s\n' % ( (slotno+1), label) )
+                        code.append( '    %s:\n' % label )
+                    else:
+                        raise Exception( 'unknown localfn ( expecting <local>.get or <local>.set ): %s' % repr( command.value() ) )
+                    
+            elif command.kind() == 'fnref':
+                code.append( '    ; push reference to fn\n' )
+                code.append( '    mov qword [r14], %s\n' % command.value() )
+                code.append( '    add r14, 8\n' )
+                
+            elif command.kind() == 'subfn':
+                code.append( '    ; push subfn reference\n' )
+                code.append( '    mov qword [r14], %s\n' % command.value() )
+                code.append( '    add r14, 8\n' )
                 
             else:
                 raise Exception( 'wat %s %s' % ( str( command.kind() ), repr( command.value() ) ) )
         
-        if functions[ fn ].nlocals():
+        if functions[ fn ].body().nlocals():
             code.append( '    ; pop any locals\n' )
-            code.append( '    sub r15, %d\n' % functions[ fn ].nlocals() * 8 )
+            code.append( '    sub r15, %d\n' % ( functions[ fn ].body().nlocals() * 8 ) )
             
         code.append( '    sub r15, 8\n' )
         code.append( '    jmp [r15]\n' )
         
-    return '\n'.join( [''.join(pre), ''.join( data ), ''.join( code ) ] )
+    return '\n'.join( [''.join(pre), ''.join( data ), ''.join( code ), ''.join( bss ) ] )
     
 def asm_stringize( ss ):
     bits      = []

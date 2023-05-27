@@ -1,74 +1,13 @@
 
-@ "AMD64" ;
-
-:write
-       dup cStrLen 1 cWrite
-  "\n" dup cStrLen 1 cWrite
-  ;
-  
-:log
-       dup cStrLen 2 cWrite
-  "\n" dup cStrLen 2 cWrite
-  ;
-
-:panic
-  log
-  1 exit
-  ;
-
-:loop { $todo $loop }
-  $todo.set
-  $loop.here
-  $todo.get
-  call
-  $loop.get
-  1
-  $.jumpIf
-  ;
-
-# (todo cond)
-:while { $test $todo $retry $condRet }
-  $test.set    # pop stack into test local
-  $todo.set    # pop stack into todo local
-  
-  $retry.here  # push address following command into local
-  
-  $test.get    # push and call the cond func
-  call
-  
-  dup          # dups its return value
-  $condRet.set # pop the copy into condret
-  
-  $todo.get    # push the todo and call it if return was truthy
-  swap         # the todo and test value are reversed on the top of the stack
-  $.callIf     # ( consumes ret and leave datastack clean for called function )
-  
-  $retry.get   # push the retry address
-  $condRet.get # push the return value back onto the stack
-  $.jumpIf     # pops both, jumps to the address if condret was true
-  
-  # otherwise we end up here with a clean datastack ( excepting what cond/todo may have pushed
-  # we can just ignore callstack locals and just walk back past them
-  # done
-;
-
-# [: todo times
-:repeat { $times $todo $loop }
-  $times.set  # [: todo
-  $todo.set   # [: 
-  $loop.here  # [: 
-  
-  $times.get  # [: times
-  dup         # [: times times
-  decr        # [: times (times-1)
-  $times.set  # [: times
-  not         # [: !times
-  $.leaveIf   # [: 
-  
-  $todo.get   # [: todo
-  call        # [: 
-  
-  $loop.get   # [: loop
-  1           # [: loop 1
-  $.jumpIf    # [: 
-  ;
+@ "STANDARD-STACK" ;
+@ "STANDARD-MEMORY" ;
+@ "STANDARD-ARITHMETIC" ;
+@ "STANDARD-CSTRINGS" ;
+@ "STANDARD-SYSCALLS" ;
+@ "STANDARD-STARTUP" ;
+@ "STANDARD-IO" ;
+@ "STANDARD-CONTROL" ;
+@ "STANDARD-ERRNO" ;
+@ "STANDARD-STRUCTS" ;
+@ "STANDARD-GCARENA" ;
+@ "STANDARD-STRINGS" ;

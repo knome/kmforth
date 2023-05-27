@@ -1,0 +1,54 @@
+
+:loop { $todo $loop }
+  $todo.set
+  $loop.here
+  $todo.get
+  call
+  $loop.get
+  $.jump
+;
+
+# (todo cond)
+:while { $test $todo $retry $condRet }
+  $test.set    # pop stack into test local
+  $todo.set    # pop stack into todo local
+  
+  $retry.here  # push address following command into local
+  
+  $test.get    # push and call the cond func
+  call
+  
+  dup          # dups its return value
+  $condRet.set # pop the copy into condret
+  
+  $todo.get    # push the todo and call it if return was truthy
+  $.callIf     # ( consumes ret and leave datastack clean for called function )
+  
+  $condRet.get # push the return value back onto the stack
+  $retry.get   # push the retry address
+  $.jumpIf     # pops both, jumps to the address if condret was true
+  
+  # otherwise we end up here with a clean datastack ( excepting what cond/todo may have pushed
+  # we can just ignore callstack locals and just walk back past them
+  # done
+;
+
+# [: todo times
+:repeat { $times $todo $loop }
+  $times.set  # [: todo
+  $todo.set   # [: 
+  $loop.here  # [: 
+  
+  $times.get  # [: times
+  dup         # [: times times
+  decr        # [: times (times-1)
+  $times.set  # [: times
+  not         # [: !times
+  $.leaveIf   # [: 
+  
+  $todo.get   # [: todo
+  call        # [: 
+  
+  $loop.get   # [: loop
+  $.jump      # [: 
+;

@@ -1,0 +1,96 @@
+
+# linux error codes
+
+% errno/-define-errors (@errors)
+  @ errno/-define-error-constants @errors ;
+  @ errno/-define-strerror @errors ;
+  @ errno/-define-dump-errors @errors ;
+; 
+
+% errno/-define-error-constants (@error.each)
+  @ errno/-define-error @error ;
+;
+
+% errno/-define-error ((@name @value @description))
+  : errno/@name @value ;
+;
+
+# terrifically inefficient, eh?
+# 
+% errno/-define-strerror (@errors)
+  : errno/strerror { $desc }
+    
+    "unknown error" $desc.set
+    
+    @( (@errors) 
+       (@error.each)
+       
+       @( (@error)
+          ((@name @value @description))
+          
+          dup $desc.get swap @value == [ pop @description ] $.callIf $desc.set
+       )
+    )
+    
+    $desc.get
+  ;
+;
+
+# we can create expansion rules for taking lengths and maximums from macrolists
+# in order to generate a bunch of syscall/writes to properly align this without
+# resorting to the gross and errorsome (.[t].[a].[b].) character
+# 
+% errno/-define-dump-errors (@errors)
+  :errno/dump-errors
+    "ERROR CODE TABLE" write
+    @( (@errors)
+       (@error.each)
+       @( (@error)
+         ((@name @value @description))
+         "@name\t(@value)\t@description" write
+       )
+    )
+  ;
+;
+
+@ errno/-define-errors (
+  (eperm       0x01 "operation not permitted")
+  (enoent      0x02 "no such file or directory")
+  (esrch       0x03 "no such process")
+  (eintr       0x04 "interrupted system call")
+  (eio         0x05 "i/o error")
+  (enxio       0x06 "no such device or address")
+  (e2big       0x07 "argument list too long")
+  (enoexec     0x08 "exec format error")
+  (ebadf       0x09 "bad file number")
+  (echild      0x0a "no child processes")
+  (eagain      0x0b "resource temporarily unavailable / wouldblock")
+  (ewouldblock 0x0b "resource temporarily unavailable / wouldblock")
+  (enonmem     0x0c "out of memory")
+  (eacces      0x0d "permission denied")
+  (efault      0x0e "bad address")
+  (enotblk     0x0f "block device required")
+  (ebusy       0x10 "device or resource busy")
+  (eexist      0x11 "file already exists")
+  (exdev       0x12 "cross-list device")
+  (enodev      0x13 "no such device")
+  (enotdir     0x14 "not a directory")
+  (eisdir      0x15 "is a directory")
+  (einval      0x16 "invalid argument")
+  (enfile      0x17 "system file table overflow")
+  (emfile      0x18 "too many files open")
+  (enotty      0x19 "not a typewriter")
+  
+  # ... etc
+);
+
+
+# :errno/enotty      0x19 ; # not a typewriter ( bad ioctl for device or not a device )
+# :errno/etxtbsy     0x1a ; # text file busy ( tried to write to running executable )
+# :errno/efbig       0x1b ; # file too big
+# :errno/enospc      0x1c ; # no space left on device
+# :errno/espipe      0x1d ; # illegal seek
+# :errno/erofs       0x1e ; # readonly filesystem
+# :errno/emlink      0x1f ; # too many links ( too many symlinks during filepath resolution )
+# 
+# # ... etc

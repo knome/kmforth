@@ -8,14 +8,16 @@
 import sys
 import os
 import optparse
+import contextlib
+import re
 
 NUMBERS  = set( '0123456789' )
 LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz' )
 
-WORDSTART = LETTERS.union( set('_') )
-WORDBITS  = LETTERS.union( NUMBERS ).union( '_-.' )
+WORDSTART = LETTERS.union( set('_+-/*<>-%=.@') )
+WORDBITS  = WORDSTART.union( NUMBERS )
 
-STRUCTBITS = ':;[]{}@'
+STRUCTBITS = ':;[]{}()'
 
 def log( *args, **kwargs ):
     kwargs[ 'file' ] = sys.stderr
@@ -34,35 +36,116 @@ def main():
         path   = free[0]                     ,
     )]
     
-    allFns  = {}
-    allDefs = []
+    allNames  = set()
+    allFns    = {}
+    
+    macroContext = MacroContext()
+    
+    namedMacroExpansions = []
+    
     while pending:
         
         pp = pending.pop()
         
-        incode      = pp.read_source()
-        characters  = Source( parse_characters( data = incode, fileno = pp.fileno() ) )
-        tokens      = Source( parse_tokens( characters = characters ) )
-        definitions = Source( parse_definitions( tokens = tokens, currentModule = pp ) )
-        
-        functions, includes = categorize_definitions( definitions )
-        
-        for fn in functions:
-            if functions[ fn ].name().value() in allFns:
-                raise Exception( 'duplicate function: %s' % repr( fn ) )
-            else:
-                allFns[ functions[ fn ].name().value() ] = functions[ fn ]
-        
-        for inc in includes:
-            norm = os.path.normpath( inc.path() )
-            if norm not in seen:
-                pending.append( inc )
-                seen.add( norm )
+        with print_on_exception( "WHILE PROCESSING FILE: %s" % repr( pp.path() ) ):
+            
+            incode = pp.read_source()
+            
+            characters = Source( parse_characters(
+                data       = incode ,
+                fileSource = pp     ,
+            ))
+            
+            tokens = Source( parse_tokens(
+                characters = characters
+            ))
+            
+            definitions = Source( parse_definitions(
+                tokens        = tokens       ,
+                currentModule = pp           ,
+                macroContext  = macroContext ,
+            ))
+            
+            while True:
+                definition = definitions.take()
+                if not definition:
+                    break
+                
+                elif definition.definition_type() == 'function':
+                    # functions have to be recursively
+                    # added because they have lambdas
+                    # in them
+                    
+                    fns = [ definition ]
+                    while fns:
+                        fn = fns.pop(0)
+                        if fn.name().value() in allNames:
+                            raise Exception( 'duplicate function/macro name: %s' % repr( definition.name() ) )
+                        else:
+                            allNames.add( fn.name().value() )
+                            allFns[ fn.name().value() ] = fn
+                            
+                            for subfn in fn.body().subfns():
+                                fns.append( subfn )
+                
+                elif definition.definition_type() == 'include':
+                    # includes can be specified all over
+                    # we just discard all repeat references
+                    norm = os.path.normpath( definition.path() )
+                    if norm not in seen:
+                        pending.append( definition )
+                        seen.add( norm )
+                    
+                elif definition.definition_type() == 'macro-definition':
+                    
+                    if definition.name().value() in allNames:
+                        raise Exception( 'duplicate function/macro name: %s' % repr( definition.name() ) )
+                    else:
+                        allNames.add( definition.name().value() )
+                        macroContext.add_macro( definition.name().value(), definition )
+                    
+                elif definition.definition_type() == 'named-macro-expansion':
+                    namedMacroExpansions.append( definition )
+                    
+                else:
+                    raise Exception( 'unknown definition type: %s' % repr( definition ) )
     
-    functions = analyze_functions( allFns )
-    outcode   = generate_code( allFns )
+    if namedMacroExpansions:
+        macroFunctions = expand_macros(
+            namedMacroExpansions = namedMacroExpansions ,
+            macroContext         = macroContext         ,
+        )
+        fns = []
+        for mfn in macroFunctions:
+            fns.append( mfn )
+        while fns:
+            fn = fns.pop(0)
+            if fn.name().value() in allFns:
+                raise Exception(
+                    'macro-generated function-name already defined: %s' % repr( fn.name().value() )
+                )
+            else:
+                allNames.add( fn.name().value() )
+                allFns[ fn.name().value() ] = fn
+                for subfn in fn.body().subfns():
+                    fns.append( subfn )
+    
+    usedFns = analyze_functions( allFns )
+    
+    outcode = generate_code(
+        functions     = allFns  ,
+        usedFunctions = usedFns ,
+    )
     
     print( outcode )
+
+@contextlib.contextmanager
+def print_on_exception( comment ):
+    try:
+        yield
+    except Exception:
+        log( comment )
+        raise
 
 class FileSource:
     
@@ -85,11 +168,8 @@ class FileSource:
     def fileno( self ):
         return self._fileno
     
-    def is_function( self ):
-        return False
-    
-    def is_include( self ):
-        return True
+    def definition_type( self ):
+        return 'include'
     
     def path(
         self ,
@@ -147,56 +227,75 @@ class Source:
         self._pending = None
         return vv
 
+class Location:
+    def __init__(
+        self     ,
+        fileno   ,
+        filename ,
+        line     ,
+        column   ,
+    ):
+        self._fileno   = fileno
+        self._filename = filename
+        self._line     = line
+        self._column   = column
+
+    def __repr__(
+        self
+    ):
+        return '(%s:%s:%s)' % (
+            self._filename ,
+            self._line     ,
+            self._column   ,
+        )
+    
+    def fileno   ( self ): return self._fileno
+    def filename ( self ): return self._filename
+    def line     ( self ): return self._line
+    def column   ( self ): return self._column
+
 class Character:
     def __init__(
         self      ,
-        fileno    ,
-        line      ,
-        column    ,
+        location  ,
         character ,
     ):
-        self._fileno    = fileno
-        self._line      = line
-        self._column    = column
+        self._location  = location
         self._character = character
         return
     
-    def fileno    ( self ): return self._fileno
-    def line      ( self ): return self._line
-    def column    ( self ): return self._column
+    def __repr__(
+        self ,
+    ):
+        return '<Character character=%s>' % repr( self._character )
+    
+    def location  ( self ): return self._location
     def character ( self ): return self._character
 
 class Token:
     def __init__(
-        self   ,
-        fileno ,
-        line   ,
-        column ,
-        kind   ,
-        value  ,
+        self     ,
+        location ,
+        kind     ,
+        value    ,
     ):
-        self._fileno = fileno
-        self._line   = line
-        self._column = column
-        self._kind   = kind
-        self._value  = value
+        self._location = location
+        self._kind     = kind
+        self._value    = value
         return
     
-    def fileno ( self ): return self._fileno
-    def line   ( self ): return self._line
-    def column ( self ): return self._column
-    def kind   ( self ): return self._kind
-    def value  ( self ): return self._value
+    def location ( self ): return self._location
+    def kind     ( self ): return self._kind
+    def value    ( self ): return self._value
     
     def __repr__( self ):
-        return '<Token (%s:%s) kind=%s value=%s>' % (
-            repr( self._line   ),
-            repr( self._column ),
-            repr( self._kind   ),
-            repr( self._value  ),
+        return '<Token %s kind=%s value=%s>' % (
+            repr( self._location ),
+            repr( self._kind     ),
+            repr( self._value    ),
         )
 
-def parse_characters( data, fileno ):
+def parse_characters( data, fileSource ):
     assert isinstance( data, str )
     
     line   = 1
@@ -204,10 +303,13 @@ def parse_characters( data, fileno ):
     
     for cc in data:
         yield Character(
-            fileno    = fileno ,
-            line      = line   ,
-            column    = column ,
-            character = cc     ,
+            location = Location(
+                fileno   = fileSource.fileno() ,
+                filename = fileSource.path()   ,
+                line     = line                ,
+                column   = column              ,
+            ),
+            character = cc ,
         )
         
         if cc == "\n":
@@ -244,11 +346,9 @@ def parse_tokens( characters ):
             
         elif cc.lower() in STRUCTBITS:
             yield Token(
-                fileno = nc.fileno() ,
-                line   = nc.line()   ,
-                column = nc.column() ,
-                kind   = cc.lower()  ,
-                value  = None        ,
+                location = nc.location() ,
+                kind     = cc.lower()    ,
+                value    = None          ,
             )
         
         else:
@@ -291,6 +391,9 @@ def extract_string( initial, characters ):
             elif cc == '"':
                 bits.append( '"' )
                 continue
+            elif cc == 't':
+                bits.append( '\t' )
+                continue
             else:
                 raise Exception( 'unknown escape: %s' % repr( '\\' + cc ) )
         else:
@@ -303,36 +406,79 @@ def extract_string( initial, characters ):
                 bits.append( cc )
                 continue
     
+    value = ''.join( bits )
+    
+    # TODO, eventually modify this so @'s can be \escaped
+    kind = 'string'
+    if '@' in value:
+        kind = 'macrostring'
+    
     return Token(
-        fileno = initial.fileno()  ,
-        line   = initial.line()   ,
-        column = initial.column() ,
-        kind   = 'string'         ,
-        value  = ''.join( bits )  ,
+        location = initial.location() ,
+        kind     = kind               ,
+        value    = value              ,
     )
 
 def extract_number( initial, characters ):
+    
+    if initial.character() == '-' and ( ( not characters.peek() ) or ( characters.peek().character() not in NUMBERS ) ):
+        return extract_word( initial, characters )
+    
     bits = [ initial.character() ]
     while True:
         pc = characters.peek()
         if not pc:
             break
         cc = pc.character()
-        if cc in '0123456789.':
+        if cc in '0123456789.xoabcdef':
             bits.append( cc )
             characters.take()
             continue
         else:
             break
-    if '.' in bits:
-        raise Exception( 'float not currently handled' )
-    return Token(
-        fileno  = initial.fileno() ,
-        line    = initial.line()   ,
-        column  = initial.column() ,
-        kind    = 'integer'        ,
-        value   = ''.join( bits )  ,
+    
+    value = ''.join( bits )
+    given = value
+    
+    try:
+        negative = False
+        if value.startswith('-'):
+            value    = value[1:]
+            negative = True
+        
+        if '-' in value:
+            raise Exception( '"-" in number other than at start: %s' % repr( given ) )
+        
+        if '.' in value:
+            raise Exception( 'float not currently handled' )
+        
+        base = 10
+        if value.startswith( '0x' ):
+            base = 16
+            value = value[2:]
+        elif value.startswith( '0o' ):
+            base = 8
+            value = value[2:]
+        elif value.startswith( '0b' ):
+            base = 2
+            value = value[2:]
+        
+        # should throw if any trash is left in the number
+        value = int( value, base )
+        
+        if negative:
+            value = -value
+        
+    except ValueError as err:
+        raise Exception( 'error parsing number: %s' % repr( given ) )
+    
+    tt = Token(
+        location = initial.location() ,
+        kind     = 'integer'          ,
+        value    = value              ,
     )
+    
+    return tt
 
 def extract_code( initial, characters ):
     bits = []
@@ -346,11 +492,9 @@ def extract_code( initial, characters ):
         else:
             bits.append( cc )
     return Token(
-        fileno = initial.fileno() ,
-        line   = initial.line()   ,
-        column = initial.column() ,
-        kind   = 'code'           ,
-        value  = ''.join( bits )  ,
+        location = initial.location() ,
+        kind     = 'code'             ,
+        value    = ''.join( bits )    ,
     )
 
 def extract_word( initial, characters ):
@@ -365,87 +509,157 @@ def extract_word( initial, characters ):
             bits.append( cc )
         else:
             break
+    
     if initial.character() == '$':
         kind  = 'localfn'
         value = ''.join(bits)
     elif initial.character() == '&':
         kind  = 'fnref'
         value = ''.join(bits)[1:]
+    elif initial.character() == '@' or '@' in bits:
+        if len( bits ) == 1:
+            kind  = '@'
+            value = None
+        else:
+            kind  = 'macrovar'
+            value = ''.join(bits)
     else:
         kind  = 'word'
         value = ''.join(bits)
-        
+    
     return Token(
-        fileno = initial.fileno() ,
-        line   = initial.line()   ,
-        column = initial.column() ,
-        kind   = kind             ,
-        value  = value            ,
+        location = initial.location() ,
+        kind     = kind               ,
+        value    = value              ,
     )
 
-def parse_definitions( tokens, currentModule ):
+def extract_macrovar( initial, characters ):
+    bits = []
     while True:
-        dd = parse_clause( tokens, currentModule )
-        if dd == None:
-            return
-        else:
-            yield dd
-
-def parse_clause( tokens, currentModule ):
-    initial = tokens.take()
-    if not initial:
-        return None
-    elif initial.kind() == ':':
-        return parse_named_function(
-            initial = initial ,
-            tokens  = tokens  ,
-        )
-    elif initial.kind() == '@':
-        return parse_include(
-            initial       = initial       ,
-            tokens        = tokens        ,
-            currentModule = currentModule ,
+        pc = characters.peek()
+        if not pc:
+            break
+        elif pc.character().lower() not in WORDBITS:
+            break
+        
+        characters.take()
+        bits.append( pc.character() )
+    
+    value = ''.join( bits )
+    
+    if value == '':
+        return Token(
+            location = initial.location() ,
+            kind     = '@'                ,
+            value    = None               ,
         )
     else:
-        raise Exception( 'expected ":" at head of definition, found: %s:' % repr( initial ) )
+        return Token(
+            location = initial.location() ,
+            kind     = 'macrovar'         ,
+            value    = value              ,
+        )
 
-def parse_named_function( initial, tokens ):
-    
+def parse_definitions(
+    tokens               ,
+    currentModule        ,
+    macroContext         ,
+):
+    while True:
+        initial = tokens.take()
+        if not initial:
+            return
+        elif initial.kind() == ':':
+            yield parse_named_function(
+                initial       = initial       ,
+                tokens        = tokens        ,
+                currentModule = currentModule ,
+                macroContext  = macroContext  ,
+            )
+        elif initial.kind() == '@':
+            pp = tokens.peek()
+            if pp and pp.kind() == 'string':
+                yield parse_include(
+                    initial       = initial       ,
+                    tokens        = tokens        ,
+                    currentModule = currentModule ,
+                )
+            else:
+                yield parse_named_macro_expansion(
+                    initial       = initial       ,
+                    tokens        = tokens        ,
+                    currentModule = currentModule ,
+                    macroContext  = macroContext  ,
+                )
+        elif initial.kind() == 'word' and initial.value() == '%':
+            yield parse_macro_definition(
+                initial       = initial       ,
+                tokens        = tokens        ,
+                currentModule = currentModule ,
+            )
+        else:
+            raise Exception(
+                'unknown definition marker: %s' % repr( initial )
+            )
+
+def parse_named_function(
+    initial       ,
+    tokens        ,
+    currentModule ,
+    macroContext  ,
+):
     name = tokens.take()
     if not name:
-        raise Exception( 'expected name of definition after %s, found end of data' % repr( initial ) )
-    elif name.kind() == 'word':
+        raise Exception(
+            'expected name of definition after %s, found end of data' % repr( initial )
+        )
+    if name.kind() == 'word':
         pass
     else:
-        raise Exception( 'expected name of definition after %s, found: %s' % ( repr( initial ), repr( name ) ) )
+        raise Exception(
+            'expected name of definition after %s, found: %s' % (
+                repr( initial ) ,
+                repr( name )    ,
+            )
+        )
     
-    body = parse_body( initial, tokens )
+    bodyBits = capture_balanced_bits_til_terminator( tokens )
     
-    ct = tokens.take()
-    if ct == None:
+    end = tokens.take()
+    if end == None:
         raise Exception( 'expected ";" after %s' % repr( initial ) )
-    elif ct.kind() != ';':
-        raise Exception( 'expected ";" after %s, found %s' % ( repr( initial ), repr( ct ) ) )
+    elif end.kind() != ';':
+        raise Exception(
+            'expected ";" after %s, found %s' % ( repr( initial ), repr( end ) )
+        )
+    
+    bodyBits.append( end )
+    
+    body = parse_body(
+        initial = initial,
+        tokens  = Source( expand_bitstream(
+            macroContext = macroContext       ,
+            tokens       = Source( bodyBits ) ,
+        )),
+    )
     
     return NamedFunction(
-        fileno = initial.fileno() ,
-        line   = initial.line()   ,
-        column = initial.column() ,
-        name   = name             ,
-        body   = body             ,
+        location = initial.location() ,
+        name     = name               ,
+        body     = body               ,
     )
 
 def parse_lambda_definition( initial, tokens ):
     body = parse_body( initial, tokens )
     return LambdaFunction(
-        fileno = initial.fileno() ,
-        line   = initial.line()   ,
-        column = initial.column() ,
-        body   = body             ,
+        location = initial.location() ,
+        body     = body               ,
     )
 
-def parse_body( initial, tokens ):
-    
+def parse_body(
+    initial ,
+    tokens  ,
+):
     localfns = parse_optional_locals( tokens )
     
     commands = []
@@ -483,44 +697,39 @@ def parse_body( initial, tokens ):
             )
             subfns.append( subfn )
             commands.append( Token(
-                fileno = subfn.fileno()       ,
-                line   = subfn.line()         ,
-                column = subfn.column()       ,
-                kind   = 'subfn'              ,
-                value  = subfn.name().value() ,
+                location = subfn.location()     ,
+                kind     = 'subfn'              ,
+                value    = subfn.name().value() ,
             ))
         elif pt.kind() == 'word':
             tokens.take()
             commands.append( Token(
-                fileno = pt.fileno()          ,
-                line   = pt.line()            ,
-                column = pt.column()          ,
-                kind   = 'word'               ,
-                value  = 'kmfn_' + pt.value() ,
+                location = pt.location()                  ,
+                kind     = 'word'                         ,
+                value    = 'kmfn_' + mangle( pt.value() ) ,
             ))
         elif pt.kind() == 'fnref':
             tokens.take()
             commands.append( Token(
-                fileno = pt.fileno()          ,
-                line   = pt.line()            ,
-                column = pt.column()          ,
-                kind   = 'fnref'              ,
-                value  = 'kmfn_' + pt.value() ,
+                location = pt.location()                  ,
+                kind     = 'fnref'                        ,
+                value    = 'kmfn_' + mangle( pt.value() ) ,
             ))
-        
         elif pt.kind() in [ 'localfn', 'string', 'integer', 'code' ]:
             tokens.take()
             commands.append( pt )
+            
+        elif pt.kind() == '(':
+            raise Exception( 'macrolist outside of macro-parameters or arguments: %s' % repr( pt ) )
+            
         else:
             raise Exception( 'what is %s' % repr( pt ) )
     
     return Body(
-        fileno   = initial.fileno() ,
-        line     = initial.line()   ,
-        column   = initial.column() ,
-        commands = commands         ,
-        localfns = localfns         ,
-        subfns   = subfns           ,
+        location = initial.location() ,
+        commands = commands           ,
+        localfns = localfns           ,
+        subfns   = subfns             ,
     )
 
 def parse_optional_locals( tokens ):
@@ -559,20 +768,32 @@ def parse_optional_locals( tokens ):
     
     return localNames
 
+def mangle( name ):
+    bits = []
+    
+    for cc in name:
+        if cc.lower() in LETTERS:
+            bits.append( cc )
+        elif cc in NUMBERS:
+            bits.append( cc )
+        else:
+            for byte in cc.encode( 'utf-8' ):
+                bits.append( '_' + hex(byte)[2:] + '_' )
+    
+    final = ''.join( bits )
+    
+    return final
+
 class NamedFunction:
     def __init__(
-        self   ,
-        fileno ,
-        line   ,
-        column ,
-        name   ,
-        body   ,
+        self     ,
+        location ,
+        name     ,
+        body     ,
     ):
-        self._fileno = fileno
-        self._line   = line
-        self._column = column
-        self._name   = name
-        self._body   = body
+        self._location = location
+        self._name     = name
+        self._body     = body
         return
     
     def __repr__( self ):
@@ -581,94 +802,79 @@ class NamedFunction:
             repr( len( self._body.commands() ) ) ,
         )
     
-    def is_function( self ): return True
+    def definition_type( self ):
+        return 'function'
     
-    def fileno ( self ): return self._fileno
-    def line   ( self ): return self._line
-    def column ( self ): return self._column
-    def body   ( self ): return self._body
+    def location ( self ): return self._location
+    def body     ( self ): return self._body
     
     def name( self ):
         return Token(
-            fileno = self._name.fileno()          ,
-            line   = self._name.line()            ,
-            column = self._name.column()          ,
-            kind   = 'word'                       ,
-            value  = 'kmfn_' + self._name.value() ,
+            location = self._name.location()                ,
+            kind   = 'word'                                 ,
+            value  = 'kmfn_' + mangle( self._name.value() ) ,
         )
 
 class LambdaFunction:
+    
+    NN = 0
+    
     def __init__(
-        self   ,
-        fileno ,
-        line   ,
-        column ,
-        body   ,
+        self     ,
+        location ,
+        body     ,
     ):
-        self._fileno = fileno
-        self._line   = line
-        self._column = column
-        self._body   = body
+        self._location = location
+        self._body     = body
+        
+        self._name     = self._get_name()
         return
     
+    @classmethod
+    def _get_name( klass ):
+        nn = 'kmlambda_%s' % str( klass.NN )
+        klass.NN += 1
+        return nn
+    
     def __repr__( self ):
-        return '<LambdaFunction (%d:%d:%d) commands=%d>' % (
-            self._fileno                 ,
-            self._line                   ,
-            self._column                 ,
+        return '<LambdaFunction %s name=%s commands=%d>' % (
+            repr( self._location )       ,
+            self.name()                  ,
             len( self._body.commands() ) ,
         )
     
-    def fileno ( self ): return self._fileno
-    def line   ( self ): return self._line
-    def column ( self ): return self._column
-    def body   ( self ): return self._body
+    def location ( self ): return self._location
+    def body     ( self ): return self._body
     
     def name( self ):
         return Token(
-            fileno = self._fileno ,
-            line   = self._line   ,
-            column = self._column ,
-            kind   = 'word'       ,
-            value  = 'kmlambda_%s_%s_%s' % (
-                str( self._fileno ),
-                str( self._line   ),
-                str( self._column ),
-            ),
+            location = self._location ,
+            kind   = 'word'           ,
+            value  = self._name       ,
         )
 
 class Body:
     
     def __init__(
         self     ,
-        fileno   ,
-        line     ,
-        column   ,
+        location ,
         commands ,
         localfns ,
         subfns   ,
     ):
-        self._fileno   = fileno
-        self._line     = line
-        self._column   = column
+        self._location = location
         self._commands = commands
         self._localfns = localfns
         self._subfns   = subfns
         return
     
-    def is_function ( self ): return True
-    def is_include  ( self ): return False
-    
     def __repr__( self ):
-        return '<Definition (%s:%s) command.cnt=%s>' % (
-            repr( self._line            ),
-            repr( self._column          ),
-            repr( len( self._commands ) ),
+        return '<Definition %s command.cnt=%s>' % (
+            repr( self._location )        ,
+            repr( len( self._commands ) ) ,
         )
     
-    def fileno   ( self ): return self._fileno
-    def line     ( self ): return self._line
-    def column   ( self ): return self._column
+    def location ( self ): return self._location
     def commands ( self ): return self._commands
     def nlocals  ( self ): return len( self._localfns )
     def localfns ( self ): return self._localfns
@@ -707,42 +913,1500 @@ def parse_include( initial, tokens, currentModule ):
         path   = path.value()                                     ,
     )
 
-#####
+class MacroContext:
+    def __init__(
+        self                      ,
+        inMacroDefinition = False ,
+        _macros  = None           ,
+        _macrovars = None           ,
+    ):
+        self._inMacroDefinition = inMacroDefinition
+        self._macros            = _macros  or {}
+        self._macrovars         = _macrovars or {}
+        return
+    
+    def __repr__(
+        self ,
+    ):
+        return '<MacroContext #macros=%s macrovars=%s>' % (
+            len( self._macros )     ,
+            repr( self._macrovars ) ,
+        )
+    
+    def copy( self ):
+        return MacroContext(
+            inMacroDefinition = self._inMacroDefinition ,
+            _macros           = self._macros.copy()     ,
+            _macrovars        = self._macrovars.copy()  ,
+        )
+    
+    def in_macro_definition( self ):
+        return self._inMacroDefinition
+    
+    def set_in_macro_definition( self ):
+        self._inMacroDefinition = True
+    
+    def has_macro( self, name ):
+        return name in self._macros
+    
+    def add_macro( self, name, macro ):
+        if name in self._macros:
+            raise Exception( 'duplicate macro: %s' % repr( name ) )
+        else:
+            self._macros[ name ] = macro
+    
+    def get_macro( self, name ):
+        if name not in self._macros:
+            raise Exception( 'unknown macro: %s' % repr( name ) )
+        else:
+            return self._macros[ name ]
+    
+    def has_macrovar( self, name ):
+        return name in self._macrovars
+    
+    def add_macrovar( self, name, value ):
+        if name in self._macrovars:
+            raise Exception( 'duplicate macro variable: %s' % repr( name ) )
+        else:
+            self._macrovars[ name ] = value
+    
+    def get_macrovar( self, name ):
+        if name not in self._macrovars:
+            raise Exception( 'unknown macro variable: %s' % repr( name ) )
+        else:
+            return self._macrovars[ name ]
+    
+    def expand_macrovar( self, name ):
+        if '@' in name.value()[1:]:
+            return self._interpolate_word( name )
+        else:
+            return self._as_is( name )
+    
+    def _as_is( self, name ):
+        if self.has_macrovar( name.value() ):
+            return self.get_macrovar( name.value() )
+        else:
+            raise Exception( 'unknown macrovar: %s' % repr( name ) )
+        
+    def _interpolate_word( self, name ):
+        
+        def replace_with_stringized( mm ):
+            ss = mm.group('name')
+            if not self.has_macrovar( ss ):
+                raise Exception( 'unknown macrovar in interpolation of %s: %s' % ( repr( name ), repr( ss ) ) )
+            vv = self.get_macrovar( ss )
+            if vv.kind() == 'word':
+                return vv.value()
+            elif vv.kind() == 'integer':
+                return str( vv.value() )
+            else:
+                raise Exception( 'some type I did not check for interpolation compatibility: %s' % repr( vv ) )
+        
+        interpolated = re.sub( '(?P<name>[@][A-Za-z][A-Za-z0-9]*)', replace_with_stringized, name.value() )
+        
+        if not interpolated:
+            raise Exception( 'is this even possible?' )
+        elif interpolated[0] not in WORDSTART:
+            raise Exception( 'interpolation of %s created illegal word %s starting with non-wordstart: %s' % (
+                repr( name )            ,
+                repr( interpolated )    ,
+                repr( interpolated[0] ) ,
+            ))
+        else:
+            for ii in interpolated[1:]:
+                if ii not in WORDBITS:
+                    raise Exception(
+                        'interpolation of %s create illegal word %s containing non-wordbit: %s' % (
+                            repr( name )         ,
+                            repr( interpolated ) ,
+                            repr( ii )           ,
+                        )
+                    )
+        
+        return Token(
+            location = name.location() ,
+            kind     = 'word'          ,
+            value    = interpolated    ,
+        )
 
-def categorize_definitions( definitions ):
-    fns = {}
-    ins = {}
+def parse_macro_definition(
+    initial       ,
+    tokens        ,
+    currentModule ,
+):
+    # % name ( parameters ) 
+    #     : function definition
+    #       we should not expand yet
+    #       just collect the contents
+    #     ;
+    #     @ named/macro/expansion
+    #       and vars we should also collect
+    #       for later expansion when the
+    #       containing macro is expanded
+    #     ;
+    #     ...repeat...
+    # ;
+    
+    name = tokens.take()
+    if not name:
+        raise Exception( 'expected name after macro definition sigil: %s' % repr( initial ) )
+    elif name.kind() != 'word':
+        raise Exception( 'expected name after macro definition sigil to be word, found: %s' % repr( name ) )
+    
+    parameters = parse_macro_parameter_list(
+        initial = initial ,
+        tokens  = tokens  ,
+    )
+    
+    unexpandedDefinitions = parse_unexpanded_definitions(
+        tokens        = tokens        ,
+        currentModule = currentModule ,
+    )
+    
+    closer = tokens.take()
+    if not closer:
+        raise Exception( 'expected ";" to terminate macro definition starting at: %s' % repr( initial ) )
+    elif closer.kind() != ';':
+        raise Exception( 'expected ";" to terminate macro definition starting at %s, instead found: %s' % (
+            repr( initial ) ,
+            repr( closer  ) ,
+        ))
+    
+    return MacroDefinition(
+        name                  = name                  ,
+        parameters            = parameters            ,
+        unexpandedDefinitions = unexpandedDefinitions ,
+    )
+
+class MacroDefinition:
+    def __init__(
+        self                  ,
+        name                  ,
+        parameters            ,
+        unexpandedDefinitions ,
+    ):
+        self._name                  = name
+        self._parameters            = parameters
+        self._unexpandedDefinitions = unexpandedDefinitions
+        return
+    
+    def name( self ):
+        return self._name
+    
+    def definition_type( self ):
+        return 'macro-definition'
+    
+    def parameters( self ):
+        return self._parameters
+    
+    def unexpanded_definitions( self ):
+        return self._unexpandedDefinitions
+
+def parse_macro_parameter_list(
+    initial             , # macro initial character
+    tokens              ,
+):
+    start = tokens.take()
+    if not start:
+        raise Exception( 'expected "(" to start macro parameters in macro starting at: %s' % repr( initial ) )
+    elif start.kind() != '(':
+        raise Exception( 'expected "(" to start macro parameters in macro starting at %s, instead found: %s' % (
+            repr( initial ),
+            repr( start   ),
+        ))
+    
+    parameters = parse_macro_parameters(
+        initial = initial ,
+        tokens  = tokens  ,
+    )
+    
+    closer = tokens.take()
+    if not closer:
+        raise Exception( 'expected ")" to close macro parameters in macro starting at: %s' % repr( initial ) )
+    elif closer.kind() != ')':
+        raise Exception( 'expected ")" to close macro parameters in macro starting at: %s, found: %s' % (
+            repr( initial ),
+            repr( closer  ),
+        ))
+    
+    return parameters
+
+def parse_macro_parameters(
+    initial ,
+    tokens  ,
+):
+    parameters = []
     while True:
-        dd = definitions.take()
-        if dd == None:
+        parameter = parse_macro_parameter(
+            initial = initial ,
+            tokens  = tokens  ,
+        )
+        if parameter == None:
             break
         
-        if dd.is_function():
-            pending = [ dd ]
-            while pending:
-                nn = pending.pop(0)
-                if nn.name().value() in fns:
-                    raise Exception( 'duplicate function name: %s' % nn.name() )
-                fns[ nn.name().value() ] = nn
-                
-                for subfn in nn.body().subfns():
-                    pending.append( subfn )
-        
-        elif dd.is_include():
-            if dd.path() not in ins:
-                ins[ dd.path() ] = dd
-        
-        else:
-            raise Exception( 'unknown definition type: %s' % repr( dd ) )
+        parameters.append( parameter )
     
-    return fns, list( ins.values() )
+    return parameters
 
-def analyze_functions( fns ):
-    for dd in fns.values():
+def parse_macro_parameter(
+    initial ,
+    tokens  ,
+):
+    name = tokens.peek()
+    if not name:
+        return
+    elif name.kind() == ')':
+        return
+    elif name.kind() not in [ 'macrovar', '(' ]:
+        raise Exception( 'expected a macrovar in macro parameters of macro definition at %s, found: %s' % (
+            repr( initial ) ,
+            repr( name    ) ,
+        ))
+    
+    if name.kind() == '(':
+        with print_on_exception( 'while parsing macro parameters starting at %s' % repr( initial ) ):
+            parameterList = parse_macro_parameter_list(
+                initial = initial ,
+                tokens  = tokens  ,
+            )
+            
+            return MacroParameter(
+                initial  = name ,
+                namer    = NamerMacroList(
+                    parameterList = parameterList ,
+                ),
+                expander = ExpanderMacroList(
+                    parameterList = parameterList ,
+                ),
+            )
+        
+        raise Exception( 'there it is' )
+            
+    tokens.take()
+    
+    bits = name.value().split(".")
+    
+    expander = ExpanderScalar()
+    
+    parameter = MacroParameter(
+        initial  = name                          ,
+        namer    = NamerScalar( name = bits[0] ) ,
+        expander = expander                      ,
+    )
+    
+    expansionRules = {
+        'each'        : ExpansionRuleEach        ,
+        'count'       : ExpansionRuleCount       ,
+        'first'       : ExpansionRuleFirst       ,
+        'rest'        : ExpansionRuleRest        ,
+        'toZero'      : ExpansionRuleToZero      ,
+        'toOne'       : ExpansionRuleToOne       ,
+        'decr'        : ExpansionRuleDecr        ,
+        'incr'        : ExpansionRuleIncr        ,
+        'expandIf'    : ExpansionRuleExpandIf    ,
+        'expandIfNot' : ExpansionRuleExpandIfNot ,
+        'equal'       : ExpansionRuleEqual       ,
+        'lessThan'    : ExpansionRuleLessThan    ,
+        'greaterThan' : ExpansionRuleGreaterThan ,
+        'ignore'      : ExpansionRuleIgnore      ,
+        
+        'expandno'    : ExpansionRuleExpandNo    ,
+        'globalno'    : ExpansionRuleGlobalNo    ,
+    }
+    
+    for bit in bits[1:]:
+        if bit in expansionRules:
+            expander.add_expansion_rule( expansionRules[ bit ] )
+        else:
+            raise Exception( 'unknown expansion rule: %s' % repr( bit ) )
+    
+    return parameter
+
+class MacroParameter:
+    def __init__(
+        self     ,
+        initial  ,
+        namer    ,
+        expander ,
+    ):
+        self._initial        = initial
+        self._namer          = namer
+        self._expander       = expander
+        return
+    
+    def __repr__(
+        self ,
+    ):
+        return '<MacroParameter namer=%s expander=%s>' % (
+            repr( self._namer    ) ,
+            repr( self._expander ) ,
+        )
+    
+    def namer( self ):
+        return self._namer
+    
+    def expander( self ):
+        return self._expander
+    
+    def consumes_argument( self ):
+        return self._expander.consumes_argument()
+
+class ExpanderScalar:
+    def __init__(
+        self ,
+    ):
+        self._expansionRules = []
+        return
+    
+    def expansion_rules( self ):
+        return self._expansionRules
+    
+    def add_expansion_rule( self, rule ):
+        return self._expansionRules.append( rule )
+    
+    def consumes_argument( self ):
+        if not self._expansionRules:
+            return True
+        else:
+            return self._expansionRules[0].consumes_argument()
+    
+    def variations( self, source ):
+        
+        for rule in self._expansionRules:
+            source = rule( source )
+        
+        for variation in source.variations():
+            yield variation
+
+class NamerScalar:
+    def __init__(
+        self ,
+        name ,
+    ):
+        self._name = name
+    
+    def names( self, value ):
+        yield (self._name, value)
+
+class ExpanderMacroList:
+    def __init__(
+        self          ,
+        parameterList ,
+    ):
+        self._parameterList = parameterList
+        return
+    
+    def consumes_argument( self ):
+        return True
+    
+    def variations( self, source ):
+        
+        for value in source.variations():
+            
+            if value.kind() != 'macrolist':
+                raise Exception( 'cannot deconstruct a non-macrolist: %s' % repr( value ) )
+            
+            bits = value.bits()
+            
+            if len( bits ) == 0:
+                yield MacroList(
+                    location = value.location() ,
+                    bits     = []               ,
+                )
+                return
+            
+            if len( bits ) != len( self._parameterList ):
+                raise Exception( 'expected macrolist to have %s entries: %s' % (
+                    len( self._parameterList ) ,
+                    repr( value )              ,
+                ))
+            
+            root  = self._parameterList[ 0 ].expander().variations( bits[0] )
+            first = next( root, None )
+            if first == None:
+                return
+            
+            walk = [ [root,first] ]
+            
+            while True:
+                
+                # add additional items to fill out the structure
+                # 
+                while len( walk ) < len( bits ):
+                    ii = len( walk )
+                    ss = self._parameterList[ ii ].expander().variations( bits[ii] )
+                    vv = next( ss, None )
+                    if vv == None:
+                        break
+                    else:
+                        walk.append( [ss,vv] )
+                
+                # if we filled a tuple, pass it out
+                if len( walk ) == len( bits ):
+                    mm = MacroList(
+                        location = value.location()               ,
+                        bits     = list( bb for (aa,bb) in walk ) ,
+                    )
+                    yield mm
+                
+                # update the rearmost item
+                # remove it if it returns none
+                # repeat.
+                # 
+                while walk:
+                    vv = next( walk[-1][0], None )
+                    if vv == None:
+                        walk.pop()
+                        continue
+                    else:
+                        walk[-1][1] = vv
+                        break
+                
+                # stop if the initial variation returned none and was therefore removed
+                if not walk:
+                    return
+                
+        raise Exception( 'hmm' )
+        
+class NamerMacroList:
+    def __init__(
+        self          ,
+        parameterList ,
+    ):
+        self._parameterList = parameterList
+        return
+    
+    def names( self, value ):
+        
+        if value.kind() != 'macrolist':
+            raise Exception( 'expected a macrolist, got: %s' % repr( value ) )
+        
+        if len( self._parameterList ) != len( value.bits() ):
+            raise Exception( 'during expansion macro-list should have %s slots, instead found: %s' % (
+                str( len( self._parameterList ) ) ,
+                repr( value )                     ,
+            ))
+        
+        for pp, vv in zip( self._parameterList, value.bits() ):
+            for naming in pp.namer().names( vv ):
+                yield naming
+
+class ExpansionRuleEach:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+        
+    def variations( self ):
+        for value in self._source.variations():
+            
+            if value.kind() != 'macrolist':
+                raise Exception( '.each expected macrolist, found: %s' % repr( value ) )
+            
+            for bit in value.bits():
+                for token in bit.variations():
+                    yield token
+
+class ExpansionRuleCount: pass
+class ExpansionRuleFirst: pass
+class ExpansionRuleRest: pass
+
+class ExpansionRuleToZero:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+        
+    def variations( self ):
+        
+        for value in self._source.variations():
+            
+            if value.kind() != 'integer':
+                raise Exception( '.toZero received non-integer: %s' % repr( value ) )
+            
+            new = value.value() - 1
+            
+            if new > 0:
+                while new >= 0:
+                    yield Token(
+                        location = value.location() ,
+                        kind     = 'integer'        ,
+                        value    = new              ,
+                    )
+                    new -= 1
+
+class ExpansionRuleToOne:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+    
+    def variations( self ):
+        for value in self._source.variations():
+            if value.kind() != 'integer':
+                raise Exception( '.toOne received non-integer: %s' % repr( value ) )
+            new = value.value()
+            if new > 1:
+                while new >= 1:
+                    yield Token(
+                        location = value.location() ,
+                        kind     = 'integer'        ,
+                        value    = new              ,
+                    )
+                    new -= 1
+
+class ExpansionRuleDecr:
+    
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+        
+    def variations( self ):
+        for value in self._source.variations():
+            if value.kind() != 'integer':
+                raise Exception( '.decr received non-integer: %s' % repr( value ) )
+            else:
+                new = value.value() - 1
+                yield Token(
+                    location = value.location() ,
+                    kind     = 'integer'        ,
+                    value    = new              ,
+                )
+
+class ExpansionRuleIncr:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+    
+    def variations( self ):
+        for value in self._source.variations():
+            if value.kind() != 'integer':
+                raise Exception( '.decr received non-integer: %s' % repr( value ) )
+            else:
+                new = value.value() + 1
+                yield Token(
+                    location = value.location() ,
+                    kind     = 'integer'        ,
+                    value    = new              ,
+                )
+
+class ExpansionRuleExpandIf: pass
+class ExpansionRuleExpandIfNot: pass
+class ExpansionRuleEqual: pass
+    
+class ExpansionRuleLessThan:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+    
+    def variations(
+        self ,
+    ):
+        for value in self._source.variations():
+            
+            if value.kind() != 'macrolist':
+                raise Exception( '.lessThan expected a macrolist, found %s' % repr( value ) )
+            
+            # if I have a macrolist, I need to get its variations via its expander parameter
+            # what a complete pain in the arse
+            
+            last       = None
+            isLessThan = 1
+            for bit in value.bits():
+                for token in bit.variations():
+                    
+                    if token.kind() != 'integer':
+                        raise Exception( '.lessThan expected macrolist to contain integers, found %s' % repr( bit ) )
+                    
+                    if last == None:
+                        last = token
+                    else:
+                        if not ( last.value() < token.value() ):
+                            isLessThan = 0
+            
+            yield Token(
+                location = value.location() ,
+                kind     = 'integer'        ,
+                value    = isLessThan       ,
+            )
+
+                                     
+class ExpansionRuleGreaterThan: pass
+class ExpansionRuleIgnore: pass
+
+class ExpansionRuleExpandNo:
+    @staticmethod
+    def consumes_argument():
+        return False
+    
+    def __init__(
+        self ,
+    ):
+        self._nn = 0
+    
+    def variations( self ):
+        nn = self._nn
+        self._nn += 1
+        yield nn
+
+class ExpansionRuleGlobalNo:
+    NN = 0
+    
+    @staticmethod
+    def consumes_argument():
+        return False
+    
+    @classmethod
+    def variations( klass ):
+        nn = klass.NN
+        klass.NN += 1
+        yield nn
+
+def parse_unexpanded_definitions(
+    tokens        ,
+    currentModule ,
+):
+    unexpandedDefinitions = []
+    while True:
+        unexpandedDefinition = parse_unexpanded_definition(
+            tokens        = tokens        ,
+            currentModule = currentModule ,
+        )
+        if not unexpandedDefinition:
+            break
+        else:
+            unexpandedDefinitions.append( unexpandedDefinition )
+    return unexpandedDefinitions
+
+def parse_unexpanded_definition(
+    tokens        ,
+    currentModule ,
+):
+    start = tokens.peek()
+    if not start:
+        return
+    elif start.kind() == ';':
+        return
+    elif not ( start.kind() == ':' or start.kind() == '@' ):
+        raise Exception(
+            'expected ":" or "@" to start definition expansions, instead found: %s' % repr( start )
+        )
+    
+    tokens.take()
+    
+    with print_on_exception( 'while scanning in unexpanded definition starting at %s' % repr( start ) ):
+        bits = capture_balanced_bits_til_terminator( tokens )
+    
+    end = tokens.take()
+    if not end:
+        raise Exception( 'missing expected ";" to terminate statement starting with: %s' % repr( start ) )
+    elif end.kind() != ';':
+        raise Exception( 'missing expected ";" to terminate statement starting with %s, instead found: %s' % (
+            repr( start ) ,
+            repr( end   ) ,
+        ))
+    
+    bits.append( end )
+    
+    if start.kind() == ':':
+        return UnexpandedFunctionDefinition(
+            initial       = start         ,
+            bits          = bits          ,
+            currentModule = currentModule ,
+        )
+    elif start.kind() == '@':
+        return UnexpandedMacroExpansion(
+            initial       = start         ,
+            bits          = bits          ,
+            currentModule = currentModule ,
+        )
+    else:
+        raise Exception( 'not sure what this is: %s' % repr( start ) )
+
+def capture_balanced_bits_til_terminator(
+    tokens ,
+):
+    depthStack = []
+    bits = []
+    while True:
+        bit = tokens.peek()
+        if bit == None:
+            raise Exception(
+                'ran out of tokens while collecting statement'
+            )
+        
+        if bit.kind() in [ '[', '{', '(' ]:
+            tokens.take()
+            bits.append( bit )
+            depthStack.append( bit )
+        elif bit.kind() in [ ']', '}', ')' ]:
+            if depthStack:
+                tokens.take()
+                bits.append( bit )
+                matches = { '[' : ']', '{' : '}', '(' : ')' }
+                if matches[ depthStack[-1].kind() ] == bit.kind():
+                    depthStack.pop()
+                else:
+                    raise Exception( 'expected "%s" to match %s, instead found: %s' % (
+                        matches[ depthStack[-1].kind() ] == bit.kind() ,
+                        repr( depthStack[-1] )                         ,
+                        repr( bit )                                    ,
+                    ))
+            else:
+                # do not take!
+                break
+        elif bit.kind() == ';':
+            if depthStack:
+                raise Exception( 'unterminated "%s" starting at: %s' % (
+                    depthStack[-1].kind()  ,
+                    repr( depthStack[-1] ) ,
+                ))
+            else:
+                # do not take!
+                break
+        else:
+            tokens.take()
+            bits.append( bit )
+            pass
+    
+    return bits
+
+class UnexpandedFunctionDefinition:
+    def __init__(
+        self          ,
+        initial       ,
+        bits          ,
+        currentModule ,
+    ):
+        self._initial       = initial
+        self._bits          = bits
+        self._currentModule = currentModule
+        return
+    
+    def initial( self ):
+        return self._initial
+    
+    def bits( self ):
+        return self._bits
+    
+    def current_module( self ):
+        return self._currentModule
+
+class UnexpandedMacroExpansion:
+    def __init__(
+        self          ,
+        initial       ,
+        bits          ,
+        currentModule ,
+    ):
+        self._initial       = initial
+        self._bits          = bits
+        self._currentModule = currentModule
+        return
+    
+    def initial( self ):
+        return self._initial
+    
+    def bits( self ):
+        return self._bits
+    
+    def current_module( self ):
+        return self._currentModule
+
+def parse_named_macro_expansion(
+    initial       ,
+    tokens        ,
+    currentModule ,
+    macroContext  ,
+):
+    # not expanding it yet, just recording the invocation so we can expand it later
+    # the @ is in initial
+    # 
+    #   @ macro-name macro arguments (can be lists) [ or lamdbas ] ;
+    # 
+    
+    name = tokens.take()
+    if not name:
+        raise Exception( 'expected name of macro to expand to follow macro expansion sigil at: %s' % repr( initial ) )
+    elif name.kind() != 'word':
+        raise Exception( 'expected name of macro to expand to follow macro expansion sigil at %s, instead found: %s' % (
+            repr( initial ) ,
+            repr( name    ) ,
+        ))
+    
+    with print_on_exception(
+        'while scanning for named macro expansion arguments for expansion starting at: %s' % (
+            repr( initial )
+        )
+    ):
+        argumentBits = capture_balanced_bits_til_terminator(
+            tokens ,
+        )
+        
+        argumentBitsSource = Source( argumentBits )
+        
+        expandedArgumentBits = expand_bitstream(
+            macroContext = macroContext      ,
+            tokens      = argumentBitsSource ,
+        )
+        
+        expandedArgumentBitsSource = Source( expandedArgumentBits )
+        
+        arguments = parse_macro_expansion_arguments(
+            initial = initial                    ,
+            tokens  = expandedArgumentBitsSource ,
+        )
+    
+    closer = tokens.take()
+    if not closer:
+        raise Exception( 'expected ";" to close macro expansion at: %s' % repr( initial ) )
+    elif closer.kind() != ';':
+        raise Exception( 'expected ";" to close macro expansion at: %s, instead found: %s' % (
+            repr( initial ) ,
+            repr( closer  ) ,
+        ))
+    
+    return NamedMacroExpansion(
+        initial   = initial   ,
+        macroName = name      ,
+        arguments = arguments ,
+    )
+
+class NamedMacroExpansion:
+    def __init__(
+        self      ,
+        initial   ,
+        macroName ,
+        arguments ,
+    ):
+        self._initial   = initial
+        self._macroName = macroName
+        self._arguments = arguments
+        return
+    
+    def __repr__(
+        self ,
+    ):
+        return '<NamedMacroExpansion name=%s arguments=%s>' % (
+            repr( self._macroName ) ,
+            repr( self._arguments ) ,
+        )
+    
+    def initial( self ):
+        return self._initial
+    
+    def definition_type( self ):
+        return 'named-macro-expansion'
+    
+    def macro_name( self ):
+        return self._macroName
+    
+    def arguments( self ):
+        return self._arguments
+
+def parse_macro_expansion_arguments(
+    initial ,
+    tokens  ,
+):
+    arguments = []
+    
+    while True:
+        argument = parse_macro_expansion_argument(
+            initial = initial ,
+            tokens  = tokens  ,
+        )
+        if not argument:
+            break
+        else:
+            arguments.append( argument )
+    
+    return arguments
+
+def parse_macro_expansion_argument(
+    initial ,
+    tokens  ,
+):
+    # name
+    # @name 
+    # number
+    # "string"
+    # [ all of the above ]
+    # ( all of the above )
+    
+    pp = tokens.peek()
+    if pp == None:
+        return
+    elif pp.kind() == ';':
+        return
+    elif pp.kind() in [ ')', ']' ]:
+        return
+    
+    tokens.take()
+    
+    if pp.kind() == 'word':
+        if '@' in pp.value():
+            return ExpandableWordTemplate( pp )
+        else:
+            return ExpandableWordLiteral( pp )
+    elif pp.kind() == 'macrovar':
+        if '@' in pp.value():
+            return ExpandableWordTemplate( pp )
+        else:
+            return ExpandableMacrovar( pp )
+    elif pp.kind() == 'integer':
+        return ExpandableInteger( pp )
+    elif pp.kind() == 'string':
+        return ExpandableString( pp )
+    elif pp.kind() == '[':
+        bits = parse_macro_expansion_arguments(
+            initial ,
+            tokens  ,
+        )
+        
+        closer = tokens.take()
+        if not closer:
+            raise Exception( 'unterminated lambda statement starting at: %s' % repr( pp ) )
+        elif closer.kind() != ']':
+            raise Exception( 'expected "]" to close lambda at %s, instead found: %s' % (
+                repr( pp     ) ,
+                repr( closer ) ,
+            ))
+        
+        return ExpandableLambda( pp, bits )
+    elif pp.kind() == '(':
+        bits = parse_macro_expansion_arguments(
+            initial ,
+            tokens  ,
+        )
+        
+        closer = tokens.take()
+        if not closer:
+            raise Exception( 'unterminated macro-list starting at: %s' % repr( pp ) )
+        elif closer.kind() != ')':
+            raise Exception( 'expected ")" to close macro-list at %s, instead found: %s' % (
+                repr( pp     ) ,
+                repr( closer ) ,
+            ))
+        
+        return ExpandableMacroList( MacroList(
+            location = pp.location() ,
+            bits     = bits          ,
+        ))
+    elif pp.kind() == 'macrolist':
+        return ExpandableMacroList( pp )
+    else:
+        raise Exception( 'unknown bit in macro expansion variables: %s' % repr( pp ) )
+    
+class ExpandableWordTemplate:
+    def __init__(
+        self  ,
+        value ,
+    ):
+        self._value = value
+        
+class ExpandableWordLiteral:
+    def __init__(
+        self  ,
+        value ,
+    ):
+        self._value = value
+        
+    def __repr__(
+        self ,
+    ):
+        return '<ExpandableWordLiteral value=%s>' % repr( self._value )
+    
+    def variations( self ):
+        yield self._value
+
+class ExpandableMacrovar:
+    def __init__(
+        self  ,
+        value ,
+    ):
+        self._value = value
+        
+class ExpandableInteger:
+    def __init__(
+        self  ,
+        value ,
+    ):
+        self._value = value
+        return
+    
+    def __repr__(
+        self ,
+    ):
+        return '<ExpandableInteger value=%s>' % (
+            repr( self._value ) ,
+        )
+    
+    def variations( self ):
+        yield self._value
+
+class ExpandableString:
+    def __init__(
+        self  ,
+        value ,
+    ):
+        self._value = value
+    
+    def variations( self ):
+        yield self._value
+
+class ExpandableLambda:
+    def __init__(
+        self    ,
+        initial ,
+        bits    ,
+    ):
+        self._initial = initial
+        self._bits    = bits
+
+class MacroList:
+    def __init__(
+        self     ,
+        location ,
+        bits     ,
+    ):
+        self._location = location
+        self._bits     = bits
+    
+    def __repr__(
+        self ,
+    ):
+        return '<MacroList contents=%s>' % repr( self._bits )
+    
+    def kind( self ):
+        return 'macrolist'
+    
+    def location( self ):
+        return self._location
+    
+    def bits( self ):
+        return self._bits
+        
+class ExpandableMacroList:
+    def __init__(
+        self  ,
+        value ,
+    ):
+        self._value = value
+        
+    def __repr__(
+        self ,
+    ):
+        return '<ExpandableMacroList contents=%s>' % repr( self._value )
+    
+    def variations( self ):
+        yield self._value
+
+#####
+
+def expand_macros(
+    namedMacroExpansions ,
+    macroContext         ,
+):
+    for macroExpansion in namedMacroExpansions:
+        fns = expand_macro(
+            macroExpansion = macroExpansion ,
+            macroContext   = macroContext   ,
+        )
+        for fn in fns:
+            yield fn
+    
+def expand_macro(
+    macroExpansion ,
+    macroContext   ,
+):
+    if not macroContext.has_macro( macroExpansion.macro_name().value() ):
+        raise Exception( 'unknown macro definition: %s' % macroExpansion.macro_name() )
+    
+    md = macroContext.get_macro( macroExpansion.macro_name().value() )
+    
+    expansions = determine_macro_expansions(
+        macroStart = macroExpansion.initial()           ,
+        parameters = md.parameters()                    ,
+        arguments  = list( macroExpansion.arguments() ) ,
+    )
+    
+    expandedFunctions = []
+    for group in expansions:
+        
+        expansionContext = macroContext.copy()
+        
+        for (name, value) in group:
+            expansionContext.add_macrovar( name, value )
+        
+        for unexpandedDefinition in md.unexpanded_definitions():
+            
+            if unexpandedDefinition.initial().kind() == ':':
+                expandedBits = expand_bitstream(
+                    macroContext = expansionContext                      ,
+                    tokens       = Source( unexpandedDefinition.bits() ) ,
+                )
+                expandedFunction = parse_named_function(
+                    initial       = unexpandedDefinition.initial()        ,
+                    tokens        = Source( expandedBits )                ,
+                    currentModule = unexpandedDefinition.current_module() ,
+                    macroContext  = macroContext                          ,
+                )
+                expandedFunctions.append( expandedFunction )
+                
+            elif unexpandedDefinition.initial().kind() == '@': # or macrovar?
+                
+                expandedBits = expand_bitstream(
+                    macroContext = expansionContext                      ,
+                    tokens       = Source( unexpandedDefinition.bits() ) ,
+                )
+                expandedExpansion = parse_named_macro_expansion(
+                    initial       = unexpandedDefinition.initial()        ,
+                    tokens        = Source( expandedBits )                ,
+                    currentModule = unexpandedDefinition.current_module() ,
+                    macroContext  = macroContext                          ,
+                )
+                for fn in expand_macro(
+                    macroExpansion = expandedExpansion ,
+                    macroContext   = macroContext      ,
+                ):
+                    expandedFunctions.append( fn )
+                
+            else:
+                raise Exception(
+                    'unknown unexpanded definition type in macro expansion: %s' % (
+                        repr( unexpandedDefinition.initial() ) ,
+                    )
+                )
+    
+    return expandedFunctions
+
+def determine_macro_expansions(
+    macroStart ,
+    parameters ,
+    arguments  ,
+):
+    argSource = Source( arguments )
+    
+    nArgParams = sum( 1 for param in parameters if param.consumes_argument() )
+    nArgs      = len( arguments )
+    if nArgParams != nArgs:
+        raise Exception(
+            'macro expansion has %s argument consuming parameters, but received %s arguments at %s' % (
+                repr( nArgParams ) ,
+                repr( nArgs      ) ,
+                repr( macroStart ) ,
+            )
+        )
+    
+    # once something refuses an argument, nothing may bind one
+    refusedArgument = False
+    expansionArgSources = []
+    for param in parameters:
+        
+        if param.consumes_argument():
+            if refusedArgument:
+                raise Exception(
+                    'do not put macro parameters taht do not consume arguments before those that do: %s' % (
+                        repr( param ) ,
+                    )
+                )
+            
+            arg = argSource.take()
+            if arg == None:
+                raise Exception(
+                    'expansion at %s lacks argument for macro parameter: %s' % (
+                        repr( macroStart ) ,
+                        param.name()       ,
+                    )
+                )
+            else:
+                # for rule in param.expansion_rules():
+                #     arg = rule( arg )
+                    
+                expansionArgSources.append( NamedArgSource(
+                    namer    = param.namer()    ,
+                    expander = param.expander() ,
+                    source   = arg              ,
+                ))
+        else:
+            refusedArgument = True
+            
+            # arg   = None
+            # first = True
+            # for rule in param.expansion_rules():
+            #     if first:
+            #         arg   = rule()
+            #         first = False
+            #     else:
+            #         arg = rule( arg )
+            expansionArgSources.append( NamedArgSource(
+                namer    = param.namer()    ,
+                expander = param.expander() ,
+                source   = arg              ,
+            ))
+    
+    return chain_argument_sources( expansionArgSources )
+
+def chain_argument_sources( sources, _left = None ):
+    _left = _left or ()
+    if sources:
+        source, remaining = sources[0], sources[1:]
+        for vv in source.variations():
+            if remaining:
+                for group in chain_argument_sources( remaining, _left + tuple( source.namer().names( vv ) ) ):
+                    yield group
+            else:
+                yield _left + tuple( source.namer().names( vv ) )
+    else:
+        yield _left
+
+class NamedArgSource:
+    def __init__(
+        self     ,
+        namer    ,
+        expander ,
+        source   ,
+    ):
+        self._namer    = namer
+        self._expander = expander
+        self._source   = source
+        return
+    
+    def namer(
+        self ,
+    ):
+        return self._namer
+    
+    def variations(
+        self ,
+    ):
+        return self._expander.variations( self._source )
+
+def expand_bitstream(
+    macroContext ,
+    tokens       ,
+):
+    while True:
+        bit = tokens.take()
+        if not bit:
+            break
+        elif bit.kind() == 'macrovar':
+            yield macroContext.expand_macrovar( bit )
+        elif bit.kind() == '@':
+            for bit in extract_and_expand_local_macro(
+                macroContext = macroContext ,
+                tokens       = tokens       ,
+            ):
+                yield bit
+        elif bit.kind() == 'macrostring':
+            yield expand_macrostring(
+                macroContext = macroContext ,
+                macroString  = bit          ,
+            )
+        elif bit.kind() == 'macrolist':
+            yield bit
+        elif bit.kind() in [ ';', '{', '}', '[', ']', '(', ')', 'localfn', 'word', 'integer', 'string', 'code' ]:
+            yield bit
+        else:
+            raise Exception( 'unknown bit in macro expansion bitstream: %s' % repr( bit ) )
+
+def expand_macrostring(
+    macroContext ,
+    macroString  ,
+):
+    if macroString.kind() != 'macrostring':
+        raise Exception( 'impossible' )
+    
+    def replace( mm ):
+        macrovar = mm.group(0)
+        if not macroContext.has_macrovar( macrovar ):
+            raise Exception( 'while expanding macrostring (%s), missing macrovar: %s' % (
+                repr( macroString ) ,
+                repr( macrovar )    ,
+            ))
+        vv = macroContext.get_macrovar( macrovar )
+        if vv.kind() == 'word':
+            return vv.value()
+        elif vv.kind() == 'integer':
+            return str( vv.value() )
+        elif vv.kind() == 'string':
+            return vv.value()
+        else:
+            raise Exception( 'cannot interpolate macrostring (%s), macrovar (%s) is a %s' % (
+                repr( macroString ) ,
+                repr( macrovar )    ,
+                str( vv.kind() )    ,
+            ))
+    
+    interpolated = re.sub( '(?P<name>[@][A-Za-z][A-Za-z0-9]*)', replace, macroString.value() )
+    
+    return Token(
+        location = macroString.location() ,
+        kind     = 'string'               ,
+        value    = interpolated           ,
+    )
+
+def extract_and_expand_local_macro(
+    macroContext ,
+    tokens       ,
+):
+    # ( () () ... )
+    # 
+    #   argument expansion
+    #   parameter interpretation
+    #   body generation
+    
+    start = tokens.take()
+    if not start:
+        raise Exception( 'how did you even get here without a "(" ?' )
+    elif start.kind() != '(':
+        raise Exception( 'seriously, how without a "(" ?' )
+    
+    with print_on_exception( 'while parsing macro starting at: %s' % repr( start ) ):
+        arguments = extract_local_macro_arguments(
+            macroContext = macroContext ,
+            tokens       = tokens       ,
+        )
+        
+        parameters = parse_macro_parameter_list(
+            initial = start  ,
+            tokens  = tokens ,
+        )
+        
+        bodyBits = list( capture_balanced_bits_til_terminator(
+            tokens ,
+        ))
+        
+        end = tokens.take()
+        if not end:
+            raise Exception( 'missing ")" for macro starting at %s' % repr( start ) )
+        elif end.kind() != ')':
+            raise Exception( 'expected ")" for macro starting at %s, instead found: %s' % (
+                repr( start ) ,
+                repr( end )   ,
+            ))
+        
+        for group in determine_macro_expansions(
+            macroStart = start      ,
+            parameters = parameters ,
+            arguments  = arguments  ,
+        ):
+            expansionContext = macroContext.copy()
+            
+            for (name, value) in group:
+                expansionContext.add_macrovar( name, value )
+            
+            bodyBitsSource = Source( bodyBits )
+            
+            expandedBody = expand_bitstream(
+                macroContext = expansionContext ,
+                tokens       = bodyBitsSource   ,
+            )
+            
+            for bit in expandedBody:
+                yield bit
+    
+    return
+
+def extract_local_macro_arguments(
+    macroContext ,
+    tokens       ,
+):
+    start = tokens.take()
+    if not start:
+        raise Exception( 'expected "(" to begin local-macro argument section' )
+    elif start.kind() != '(':
+        raise Exception( 'expected "(" to begin local-macro argument section, instead found: %s' % repr( start ) )
+    
+    argumentBits = capture_balanced_bits_til_terminator(
+        tokens ,
+    )
+    
+    argumentBitsSource = Source( argumentBits )
+    
+    expandedArgumentBits = list( expand_bitstream(
+        macroContext = macroContext       ,
+        tokens       = argumentBitsSource ,
+    ))
+    
+    expandedArgumentBitsSource = Source( expandedArgumentBits )
+    
+    macroArguments = parse_macro_expansion_arguments(
+        initial = start                      ,
+        tokens  = expandedArgumentBitsSource ,
+    )
+    
+    # after because source is lazy
+    # we have to give it a chance to be consumed
+    trash = argumentBitsSource.take()
+    if trash:
+        raise Exception( 'failed to expand: %s' % repr( trash ) )
+    
+    trash = expandedArgumentBitsSource.take()
+    if trash:
+        raise Exception( 'failed to parse all expanded bits: %s' % repr( trash ) )
+    
+    end = tokens.take()
+    if not end:
+        raise Exception( 'expected ")" to end arguments section starting at: %s' % repr( start ) )
+    elif end.kind() != ')':
+        raise Exception( 'expected ")" to end arguments section starting at %s, instead found: %s' % (
+            repr( start ) ,
+            repr( end   ) ,
+        ))
+    
+    return macroArguments
+
+#####
+
+# ensures all required functions are defined
+# returns list of all actually used functions
+# 
+# TODO: use a tree starting from _start so we only get what we really actually need
+# this includes anything that's in any function ( because we just modified a scanner )
+# 
+def analyze_functions( allFns ):
+    usedFns = set()
+    for fn, dd in allFns.items():
         for cc in dd.body().commands():
             if cc.kind() == 'word':
-                if (cc.value()) not in fns:
+                if (cc.value()) not in allFns:
                     raise Exception( 'unknown function in %s: %s' % ( repr( dd ), repr( cc ) ) )
+                else:
+                    usedFns.add( cc.value() )
             elif cc.kind() == 'string':
                 pass
             elif cc.kind() == 'code':
@@ -752,17 +2416,41 @@ def analyze_functions( fns ):
             elif cc.kind() == 'localfn':
                 pass
             elif cc.kind() == 'fnref':
-                if cc.value() not in fns:
+                if cc.value() not in allFns:
                     raise Exception( 'unknown function in %s: %s' % ( repr( dd ), repr( cc ) ) )
+                else:
+                    usedFns.add( cc.value() )
             elif cc.kind() == 'subfn':
-                if cc.value() not in fns:
+                if cc.value() not in allFns:
+                    # import json
+                    # log( 'ALLFNS', json.dumps( list(allFns.keys()), indent = True ) )
                     raise Exception( 'missing lambda in %s: %s' % ( repr( dd ), repr( cc ) ) )
+                else:
+                    usedFns.add( cc.value() )
             else:
                 raise Exception( 'unexpected command form: %s' % repr( cc ) )
     
-    return fns
+    if 'kmfn__5f_start' not in allFns:
+        raise Exception( 'no :_start function' )
+    else:
+        usedFns.add( 'kmfn__5f_start' )
+    
+    return usedFns
 
 #####
+
+class StringCoalescer:
+    def __init__(
+        self ,
+    ):
+        self._string2label = {}
+        return
+    
+    def lookup( self, ss ):
+        return self._string2label.get( ss, None )
+        
+    def remember( self, ss, label ):
+        self._string2label[ ss ] = label
 
 # returnindex + 1
 # newframe = stack + sizeof( returnframe = 16) * returnindex
@@ -770,7 +2458,11 @@ def analyze_functions( fns ):
 # newframe[1] = 0
 # goto command
 
-def generate_code( functions ):
+def generate_code(
+    functions     ,
+    usedFunctions ,
+):
+    stringCoalescer = StringCoalescer()
     
     staticStrings = set()
     
@@ -793,11 +2485,16 @@ def generate_code( functions ):
     
     code.append( 'global _start\n')
     code.append( '_start:\n' )
-    code.append( '    jmp kmfn__start\n' )
+    code.append( '    jmp kmfn__5f_start\n' ) # name mangling, _5F_ = _
     code.append( '\n')
     
     nn = 0
     for fn in functions:
+        
+        # 'tree shaking'
+        if fn not in usedFunctions:
+            continue
+        
         code.append( '\n' )
         code.append( '  ' + fn + ':\n' )
         
@@ -828,12 +2525,15 @@ def generate_code( functions ):
                 if "'" in command.value():
                     raise Exception( 'need a more robust implementation' )
                 
-                sn = "km_c_" + str(nns)
-                nns += 1
-                data.append( '  ' + sn + ':\n' )
-                # convert \n into 10 here ( 10, 13 for windows, but fuck those guys
-                data.append( "    db %s\n" % asm_stringize( command.value() ) )
-                
+                sn = stringCoalescer.lookup( command.value() )
+                if not sn:
+                    sn = "km_c_" + str(nns)
+                    nns += 1
+                    data.append( '  ' + sn + ':\n' )
+                    # convert \n into 10 here ( 10, 13 for windows, but fuck those guys
+                    data.append( "    db %s\n" % asm_stringize( command.value() ) )
+                    stringCoalescer.remember( command.value(), sn )
+                    
                 code.append( '   ; pushing string literal %s\n' % repr( command.value() ) )
                 code.append( '   mov qword [r14], %s\n' % sn )
                 code.append( '   add r14, 8\n' )
@@ -845,32 +2545,37 @@ def generate_code( functions ):
             elif command.kind() == 'localfn':
                 if command.value().startswith('$.'):
                     builtin = command.value()
+                    # no localfn for unconditional call, just use 'call'
                     if builtin == '$.callIf':
                         label = '.km_nocall_' + str(nns)
                         nns += 1
                         code.append( '    ; callIf localfn\n' )
-                        code.append( '    sub r14, 8\n' )
+                        code.append( '    sub r14, 8\n' )                  # pop todo
                         code.append( '    mov rax, [r14]\n' )
-                        code.append( '    sub r14, 8\n' )
+                        code.append( '    sub r14, 8\n' )                  # pop cond
                         code.append( '    mov rbx, [r14]\n' )
-                        code.append( '    test rax,rax\n' )
-                        code.append( '    jz %s\n' % label )
-                        code.append( '    mov qword [r15], %s\n' % label )
+                        code.append( '    test rbx,rbx\n' )                # test setting zf
+                        code.append( '    jz %s\n' % label )               # jump over call if 0
+                        code.append( '    mov qword [r15], %s\n' % label ) # push return label onto callstack
                         code.append( '    add r15, 8\n' )
-                        code.append( '    jmp rbx\n' )
-                        code.append( '   %s:\n' % label )
+                        code.append( '    jmp rax\n' )                     # go
+                        code.append( '   %s:\n' % label )                  # return label
                     elif builtin == '$.jumpIf':
                         label = '.km_nojump_' + str(nns)
                         nns += 1
                         code.append( '    ; jumpIf \n' )
-                        code.append( '    sub r14, 8\n' )
+                        code.append( '    sub r14, 8\n' )     # pop jump target
                         code.append( '    mov rax, [r14]\n' )
-                        code.append( '    sub r14, 8\n' )
+                        code.append( '    sub r14, 8\n' )     # pop cond
                         code.append( '    mov rbx, [r14]\n' )
-                        code.append( '    test rax,rax\n' )
-                        code.append( '    jz %s\n' % label )
-                        code.append( '    jmp rbx\n' )
-                        code.append( '   %s:\n' % label )
+                        code.append( '    test rbx,rbx\n' )   # test cond
+                        code.append( '    jz %s\n' % label )  # jump over jump if 0
+                        code.append( '    jmp rax\n' )        # jump
+                        code.append( '   %s:\n' % label )     # don't
+                    elif builtin == '$.jump':
+                        code.append( '    ; jump\n' )
+                        code.append( '    sub r14, 8\n' )
+                        code.append( '    jmp [r14]\n' )
                     elif builtin == '$.leaveIf':
                         label = '.km_noleave_' + str(nns)
                         nns += 1
@@ -885,6 +2590,13 @@ def generate_code( functions ):
                         code.append( '    sub r15, 8\n' )
                         code.append( '    jmp [r15]\n' )
                         code.append( '   %s:\n' % label )
+                    elif builtin == '$.leave':
+                        code.append( '    ; leave\n' )
+                        if functions[ fn ].body().nlocals():
+                            code.append( '    ; (popping locals before leaving)\n' )
+                            code.append( '    sub r15, %d\n' % ( functions[fn].body().nlocals() * 8 ) )
+                        code.append( '    sub r15, 8\n' )
+                        code.append( '    jmp [r15]\n' )
                     else:
                         raise Exception( 'unknown builtin localfn: %s' % repr( command.value() ) )
                 else:
@@ -909,6 +2621,12 @@ def generate_code( functions ):
                         code.append( '    ; set local to label following this command\n' )
                         code.append( '    mov qword [r15-8*%d], %s\n' % ( (slotno+1), label) )
                         code.append( '    %s:\n' % label )
+                    elif memberfn == 'addr':
+                        # maybe replace this with &$local later?
+                        code.append( '    ; push address of local (%s) onto stack\n' % repr( localName ) )
+                        code.append( '    lea  rax,[r15-8*%d], %\n' % (slotno+1) )
+                        code.append( '    mov  [r14],rax\n' )
+                        code.append( '    add  r14,8\n' )
                     else:
                         raise Exception( 'unknown localfn ( expecting <local>.get or <local>.set ): %s' % repr( command.value() ) )
                     

@@ -1,0 +1,33 @@
+
+:memory/map-region { $size }
+  $size.set
+  syscall/mmap/no-fd
+  syscall/mmap/prot-read syscall/mmap/prot-write or
+  syscall/mmap/map-private syscall/mmap/map-anonymous or
+  syscall/mmap/place-anywhere
+  syscall/mmap/no-offset
+  $size.get
+  syscall/mmap
+;
+
+# [: addr
+# [: value
+:memory/peek-q
+  `
+  mov rax,[r14-8]
+  mov rax,[rax]
+  mov [r14-8],rax
+  `
+;
+
+# [: value addr
+# [: 
+:memory/poke-q
+  `
+  sub r14,8
+  mov rax,[r14]
+  sub r14,8
+  mov rbx,[r14]
+  mov [rax],rbx
+  `
+;

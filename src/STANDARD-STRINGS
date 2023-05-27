@@ -1,0 +1,19 @@
+
+# [: size
+# :string/buffer
+#   map-region              # [: buffer
+#   dup 0 memory/poke-q     # [: buffer (with first word = 0
+#   dup 8 + 0 memory/poke-q # [: buffer (with second word = 0
+# ;
+
+# [: buffer cstr
+# [: buffer refno
+# 
+# :string/from-cstr { $cstr $buffer }
+#   $cstr.set
+#   dup $buffer.set
+# ;  
+
+# [: string-buffer cstr
+# :string/from-cstr
+# ;

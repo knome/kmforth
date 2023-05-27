@@ -1,0 +1,45 @@
+
+:dup
+  `
+  mov rax, [r14-8] ; push whatever is on the top again
+  mov [r14], rax  
+  add r14, 8
+  `
+  ;
+
+:call
+  `
+  ; instead of pushing our return, tail call across
+  ; and let the called function pop back there
+  ;   mov qword [r15], .back
+  ;   add r15, 8
+  sub r14, 8
+  jmp [r14]
+  ; .back:
+  `
+  ;
+
+:decr `dec qword [r14-8]` ;
+:incr `inc qword [r14-8]` ;
+
+:swap
+  `
+  mov rax,[r14-8]
+  mov rbx,[r14-16]
+  mov [r14-16], rax
+  mov [r14-8], rbx
+  `
+  ;
+
+:pop ` sub r14, 8 ` ;
+
+:not
+  `
+  mov rax,[r14-8] ; grab the top of the stack
+  test rax,rax    ; test against itself to set zf
+  mov rax,0       ; 0 the register ( does not change flags )
+  setz al         ; copy zf into the low bits of the register
+  mov [r14-8],rax ; copy the register back to the top of the stack
+  `
+;
+

@@ -1,6 +1,9 @@
 
 @ "STANDARD" ;
 
-# :main [ "hello world" [[write] call] call ] loop ;
+:constant/megabyte 1024 1024 * ;
 
-:main [ "hello world" write ] 10 repeat ;
+:main
+  "hello, world" write
+  0 exit
+;

@@ -1,0 +1,131 @@
+
+# a b >  is  a > b
+# 
+:>
+  `
+  sub r14,8      ; right
+  mov rax, [r14] ;
+  sub r14,8      ; left
+  mov rbx, [r14] ; 
+  cmp rbx,rax
+  jg  .more
+  mov qword [r14], 0
+  add r14, 8
+  jmp .out
+ .more:
+  mov qword [r14], 1
+  add r14, 8
+ .out:
+  `
+;
+
+# a b <  is  a < b
+# 
+:<
+  `
+  sub r14,8      ; right
+  mov rax, [r14] ;
+  sub r14,8      ; left
+  mov rbx, [r14] ; 
+  cmp rbx,rax
+  jl  .less
+  mov qword [r14], 0
+  add r14, 8
+  jmp .out
+ .less:
+  mov qword [r14], 1
+  add r14, 8
+ .out:
+  `
+;
+
+:+
+  `
+  sub r14,8      ; right
+  mov rax, [r14] ; 
+  sub r14,8      ; left
+  mov rbx, [r14] ;
+  add rbx, rax   ;
+  mov [r14],rbx  ;
+  add r14,8
+  `
+;
+
+:-
+  `
+  sub r14,8      ; right
+  mov rax, [r14] ; 
+  sub r14,8      ; left
+  mov rbx, [r14] ;
+  sub rbx,rax    ;
+  mov [r14],rbx  ;
+  add r14,8
+  `
+;
+
+:/
+  `
+  sub r14,8      ; right
+  mov rbx, [r14] ; 
+  sub r14,8      ; left
+  mov rax, [r14] ;
+  mov rdx, 0     ;
+  idiv rbx       ;
+  mov [r14],rax  ; leaves quotient in rax, remainder in rdx
+  add r14,8
+  `
+;
+
+:%
+  `
+  sub r14,8      ; right
+  mov rbx, [r14] ; 
+  sub r14,8      ; left
+  mov rax, [r14] ;
+  mov rdx, 0     ;
+  idiv rbx       ;
+  mov [r14],rdx  ; leaves quotient in rax, remainder in rdx
+  add r14,8
+  `
+;
+
+:*
+  `
+  sub r14,8      ; right
+  mov rbx, [r14] ; 
+  sub r14,8      ; left
+  mov rax, [r14] ;
+  mov rdx, 0     ;
+  imul rbx       ;
+  mov [r14],rax  ;
+  add r14,8
+  `
+;
+
+:or
+  `
+  sub r14, 8     ; right
+  mov rax, [r14] ;
+  sub r14, 8     ; left
+  mov rbx, [r14] ; 
+  or rax, rbx
+  mov [r14], rax ;
+  add r14, 8
+  `
+;
+
+:==
+  `
+  sub r14, 8     ; right
+  mov rbx, [r14] ;
+  sub r14, 8     ; left
+  mov rax, [r14] ; 
+  sub rax, rbx   ;
+  mov rax, 0     ;
+  jnz .bad
+  add rax, 1     ;
+ .bad:
+  mov [r14], rax ;
+  add r14, 8
+  `
+;

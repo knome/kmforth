@@ -1,0 +1,19 @@
+
+:write
+       dup cstr/length 1 syscall/write
+  "\n" dup cstr/length 1 syscall/write
+;
+  
+:log
+       dup cstr/length 2 syscall/write
+  "\n" dup cstr/length 2 syscall/write
+;
+
+:panic
+  log
+  1 syscall/exit
+;
+
+:exit
+  syscall/exit
+;

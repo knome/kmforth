@@ -1,0 +1,102 @@
+
+# The kernel interface uses %rdi, %rsi, %rdx, %r10, %r8 and %r9.
+
+# PROT_NONE            0x0
+# PROT_READ            0x1
+# PROT_WRITE           0x2
+# PROT_EXEC            0x4
+# PROT_GROWSDOWN 0x1000000
+
+# MAP_SHARED          0x01
+# MAP_PRIVATE         0x02
+# MAP_SHARED_VALIDATE 0x03 # don't use
+# MAP_TYPE            0x0f # don't use
+
+# MAP_FIXED     0x10 # ( replace mappings, map to specific location? )
+# MAP_ANONYMOUS 0x20 # no file required
+
+# code that is machine specific.
+# not that I'm making this portable.
+# just because.
+
+:syscall/write
+  `
+  ;; I am aware I am ignoring the possibility of failed or partial writes here
+  
+  sub r14, 8     ; pop fd into rdi
+  mov rdi, [r14] ;
+  sub r14, 8     ; pop string length into rdx
+  mov rdx, [r14] ;
+  sub r14, 8     ; pop string pointer into rsi
+  mov rsi, [r14] ; 
+  mov rax, 1     ; write syscall
+  syscall
+  
+  test rax,rax
+  jns .good      ; jump to good if not signed ( negative = error )
+  
+  mov rdi, 200   ; exit code ( just die on errors for now )
+  mov rax, 60    ; exit syscall
+  syscall
+  
+ .good:
+  `
+;
+
+:syscall/exit
+  `
+  sub r14, 8     ; pop exit code into rdi
+  mov rdi, [r14] ;
+  mov rax, 60    ; exit syscall
+  syscall
+  `
+  ;
+
+# for desired-address
+:syscall/mmap/place-anywhere 0 ;
+
+:syscall/mmap/no-fd -1 ;
+
+:syscall/mmap/no-offset 0 ;
+
+:syscall/mmap/prot-none             0x0 ;
+:syscall/mmap/prot-read             0x1 ;
+:syscall/mmap/prot-write            0x2 ;
+:syscall/mmap/prot-exec             0x4 ;
+:syscall/mmap/prot-grows-down 0x1000000 ;
+
+:syscall/mmap/map-shared     0x1 ;
+:syscall/mmap/map-private    0x2 ;
+:syscall/mmap/map-anonymous 0x20 ;
+
+# [: openfd protection-bits flags desired-address file-offset mapping-size
+:syscall/mmap
+  `
+  sub r14, 8     ; pop desired mapping size
+  mov rsi, [r14] ; 
+  sub r14, 8     ; pop desired mapping offset
+  mov r9, [r14]  ; 
+  sub r14, 8     ; pop desired mapping address ( 0 = don't care )
+  mov rdi, [r14] ; 
+  sub r14, 8     ; pop flags ( see notes top this file )
+  mov r10, [r14] ; 
+  sub r14, 8     ; pop protection bits ( see notes top this file )
+  mov rdx, [r14] ; 
+  sub r14, 8     ; pop open fd ( -1 = none )
+  mov r8, [r14]  ; 
+  mov rax, 9     ; mmap syscall
+  syscall
+  
+  mov [r14], rax ;
+  add r14, 8 ;
+  `
+  #           [: result
+  #                                # if the return value isn't negative ( indicating an error )
+  #                                # go ahead and jump out now
+  dup 0 >   # [: result (result>0)
+  $.leaveIf # [: result
+  
+  # it's an error! for now we'll just exit with a magic opcode
+  "syscall/mmap returned an error!" log
+  201 syscall/exit
+;

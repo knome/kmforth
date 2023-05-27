@@ -1,0 +1,71 @@
+
+:_start
+  `
+  ;;; setup the data-stack
+  
+  mov rdi, 0         ; desired mapping address
+  mov rsi, 0x1000000 ; desired mapping size
+  mov rdx, 0x1|0x2   ; read/write
+  mov r10, 0x02|0x20 ; private/anonymous
+  mov r8,  -1        ; open file descriptor to map
+  mov r9,  0         ; desired mapping offset
+  mov rax, 9         ; mmap syscall number
+  syscall
+  
+  test rax,rax ; test return-register against itself
+  js .0        ; jump if it is signed ( negative )
+  
+  test rax,-1 ; is it the magic nope zone?
+  je .0
+  
+  mov r14, rax ; r14 is the permanent home of the datastack pointer, which always points to the next free slot
+  
+  mov [datastack],r14 ; we save it here to aid finding the stack base during debugging
+  
+  ;;; setup the call-stack
+  
+  mov rdi, 0         ; desired mapping address
+  mov rsi, 0x1000000 ; desired mapping size
+  mov rdx, 0x1|0x2   ; read/write
+  mov r10, 0x2|0x20  ; private/anonymous
+  mov r8,  -1        ; open file descriptor to map
+  mov r9,  0         ; desired mapping offset
+  mov rax, 9         ; mmap syscall number
+  syscall
+  
+  test rax,rax ; test return-register against itself
+  js .0        ; jump if it is signed ( negative )
+  
+  test rax,-1 ; is it the magic nope zone?
+  je .0
+  
+  mov r15, rax        ; r15 is the permanent home of the callstack pointer, which always points to the next free slot
+  mov qword [r15], .1 ; if the bottom from gets accidentally popped, we should show a message to the user indicating it
+  add r15, 8          ; bump the pointer to the next slot
+  
+  mov [callstack],r15 ; another debugging only aid
+  
+  ;;; success, jump to end of code
+  jmp .end
+  
+  ;;; exit with error
+  
+  .0:
+  mov rdi, 1  ; exit code
+  mov rax, 60 ; syscall number
+  syscall
+  
+  ;;; this will catch an accidental return from
+  ;;; the bottom of the stack, which requires the
+  ;;; stack to be damaged. why even bother with this?
+  
+  .1:
+  mov rdi, 2  ; exit code
+  mov rax, 60 ; syscall number
+  syscall
+  
+  .end:
+  `
+  main           # call the user's main function
+  0 syscall/exit # if the user returns normally from main, exit with 0
+  ;

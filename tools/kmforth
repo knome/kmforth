@@ -491,10 +491,17 @@ def extract_code( initial, characters ):
             break
         else:
             bits.append( cc )
+        
+    value = ''.join(bits)
+    if '@' in bits:
+        kind = 'macrocode'
+    else:
+        kind = 'code'
+    
     return Token(
         location = initial.location() ,
-        kind     = 'code'             ,
-        value    = ''.join( bits )    ,
+        kind     = kind               ,
+        value    = value              ,
     )
 
 def extract_word( initial, characters ):
@@ -2236,6 +2243,12 @@ def expand_bitstream(
                 macroContext = macroContext ,
                 macroString  = bit          ,
             )
+        elif bit.kind() == 'macrocode':
+            yield expand_macrocode(
+                macroContext = macroContext ,
+                macroCode    = bit          ,
+            )
+                
         elif bit.kind() == 'macrolist':
             yield bit
         elif bit.kind() in [ ';', '{', '}', '[', ']', '(', ')', 'localfn', 'word', 'integer', 'string', 'code' ]:
@@ -2251,7 +2264,9 @@ def expand_macrostring(
         raise Exception( 'impossible' )
     
     def replace( mm ):
-        macrovar = mm.group(0)
+        macrovar = mm.group('name')
+        if macrovar == '@':
+            return '@'
         if not macroContext.has_macrovar( macrovar ):
             raise Exception( 'while expanding macrostring (%s), missing macrovar: %s' % (
                 repr( macroString ) ,
@@ -2271,12 +2286,50 @@ def expand_macrostring(
                 str( vv.kind() )    ,
             ))
     
-    interpolated = re.sub( '(?P<name>[@][A-Za-z][A-Za-z0-9]*)', replace, macroString.value() )
+    interpolated = re.sub( '(?P<name>[@][A-Za-z][A-Za-z0-9]*)[@]', replace, macroString.value() )
     
     return Token(
         location = macroString.location() ,
         kind     = 'string'               ,
         value    = interpolated           ,
+    )
+
+def expand_macrocode(
+    macroContext ,
+    macroCode    ,
+):
+    if macroCode.kind() != 'macrocode':
+        raise Exception( 'impossible' )
+    
+    def replace( mm ):
+        macrovar = mm.group('name')
+        if macrovar == '@':
+            return ''
+        if not macroContext.has_macrovar( macrovar ):
+            raise Exception( 'while expanding macrocode (%s), missing macrovar: %s' % (
+                repr( macroCode ) ,
+                repr( macrovar )  ,
+            ))
+        vv = macroContext.get_macrovar( macrovar )
+        if vv.kind() == 'word':
+            return vv.value()
+        elif vv.kind() == 'integer':
+            return str( vv.value() )
+        elif vv.kind() == 'string':
+            return vv.value()
+        else:
+            raise Exception( 'cannot interpolate macrocode (%s), macrovar (%s) is a %s' % (
+                repr( macroString ) ,
+                repr( macrovar )    ,
+                str( vv.kind() )    ,
+            ))
+    
+    interpolated = re.sub( '(?P<name>[@][A-Za-z][A-Za-z0-9]*)[@]', replace, macroCode.value() )
+    
+    return Token(
+        location = macroCode.location() ,
+        kind     = 'code'               ,
+        value    = interpolated         ,
     )
 
 def extract_and_expand_local_macro(

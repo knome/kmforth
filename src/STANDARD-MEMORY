@@ -10,24 +10,39 @@
   syscall/mmap
 ;
 
-# [: addr
-# [: value
-:memory/peek-q
-  `
-  mov rax,[r14-8]
-  mov rax,[rax]
-  mov [r14-8],rax
-  `
+@ memory/-define-peekpokes (
+  ( q 8 qword mov   rax)
+  ( d 4 dword mov   eax)
+  ( w 2 word  movzx rax)
+  ( b 1 byte  movzx rax)
+);
+
+% memory/-define-peekpokes (@def.each)
+  @ memory/-define-peekpoke-for @def ;
 ;
 
-# [: value addr
-# [: 
-:memory/poke-q
-  `
-  sub r14,8
-  mov rax,[r14]
-  sub r14,8
-  mov rbx,[r14]
-  mov [rax],rbx
-  `
+% memory/-define-peekpoke-for ((@sigil @size @mnemonic @mover @target))
+  @ memory/-define-peekpoke @sigil @mnemonic @mover @target ;
+  @ memory/-define-peekpoke @size  @mnemonic @mover @target ;
+;
+
+% memory/-define-peekpoke (@name @mnemonic @mover @target)
+  
+  :memory/peek-@name
+    `
+    mov     rax,[r14-8]
+    @mover@ @target@, @mnemonic@ [rax]
+    mov     [r14-8],rax
+    `
+  ;
+  
+  :memory/poke-@name
+    `
+    sub     r14,8
+    mov     rax,[r14]
+    sub     r14,8
+    mov     rbx,[r14]
+    @mover@ @mnemonic@ [rax],rbx
+    `
+  ;
 ;

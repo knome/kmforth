@@ -1,0 +1,177 @@
+
+# 
+# simple commands interface
+# 
+
+# later we can check if the value
+# is greater than 4096 or something
+# and figure it's a string pointer
+# if so, and otherwise assume it
+# is an errno and do an appropriate
+# lookup.
+# 
+# we might be able to introduce
+# another magic local function that
+# allows you to get the location of
+# the calling frame, causing it to
+# be passed in all secret like.
+# 
+# { $hello }
+# 
+# $hello.caller # causes a value to be pushed to stack and popped into a hidden local
+#               # that will then be mov'd into the given local on command. complicates
+#               # the caller a bit, and adds a bunch of little strings indicating
+#               # where an error occurred, but it would be pretty useful
+# 
+# we could add a fn.needs_caller() to the function object to keep track of this
+# 
+# [: err message
+# 
+:dieOnError { $err }
+  swap                   # [: message err
+  dup $err.set           # [: message err
+  not dup                # [: message (!err) (!err)
+  [ swap pop ] $.callIf  # [: message (!err) | (!err) {called}
+  $.leaveIf              # [: message | {leaves with empty stack on no error}
+  
+  # THERE IS AN ERROR, WE DIE HERE
+  
+  "FATAL-ERROR" log      # [: message
+  log                    # [: 
+  $err.get               # [: err
+  
+  # guess that any value under 1024 is an errno
+  # any value over that is assumed to be a pointer to a string
+  # 
+  dup 1024 <             # [: err isErrno=(err<1024)
+  dup                    # [: err isErrno isErrno
+  
+  # print the error if it is an errno
+  # 
+  [ { $isErrno }
+    #                  # [: err isErrno
+    $isErrno.set       # [: err 
+    dup errno/strerror # [: err string
+    log                # [: err
+    $isErrno.get       # [: err isErrno
+  ]                      # [: err isErrno isErrno onIsErrno
+  $.callIf               # [: err isErrno {called or skipped}
+  
+  # print the error if it is a string
+  # 
+  not                    # [: err (!isErrno)
+  [ dup log ]            # [: err (!isErrno) onNotErrno
+  $.callIf               # [: err | err {we dup to keep the stack the same either way}
+  
+  pop # we could not dup and let the stack be inconsistent when we panic, but no
+  
+  "" panic
+;
+
+# [: filename
+# [: fd err
+# 
+:createNewFile
+  syscall/open/opt/readwrite syscall/open/opt/create or
+  syscall/open/opt/exclusive or
+  syscall/open/mode/standard-file
+  syscall/open
+;
+
+# [: filename
+# [: fd err
+# 
+:createNewPrivateFile
+  syscall/open/opt/readwrite syscall/open/opt/create or
+  syscall/open/opt/exclusive or
+  syscall/open/mode/owner/readwrite
+  syscall/open
+;
+
+# [: filename
+# [: fd err
+# 
+:openExistingFile
+  syscall/open/opt/readwrite
+  syscall/open/mode/standard-file
+  syscall/open
+;
+
+# [: fd
+# [:
+# 
+:close
+  syscall/close
+;
+
+# [: "string"
+# [: err
+# 
+:write
+       1 -write-all dup $.leaveIf pop
+  "\n" 1 -write-all
+;
+
+# [: "string" fd
+# [: err
+# 
+:-write-all { $fd $len $string  $thus $retry }
+  $fd.set
+  dup cstr/length $len.set # [: string
+  $string.set              # [:
+  0 $thus.set              # [:
+  
+  $retry.here              # [:
+  
+  $string.get              # [: string
+  $len.get $thus.get -     # [: string remaining
+  $fd.get                  # [: string remaining fd
+  syscall/write            # [: amount err
+  
+  dup                      # [: amount err err
+  [                        # [: amount err err [on-err]
+    swap     # [: err amount
+    pop      # [: err
+    dup      # [: err err (so we return 'err' on $.leaveIf)
+  ]
+  $.callIf                 # [: amount 0 | err err
+  $.leaveIf                # [: amount | err (leave)
+  
+  $thus.get +              # [: (amount+thus)
+  dup $thus.set            # [: (amount+thus)
+  
+  $len.get swap -          # [: (len-(amount+thus))
+  $retry.get               # [: (len-(amount+thus)) retry-addr
+  $.jumpIf                 # [: 
+  
+  0                        # [: 0
+;
+
+# panics on log write error
+# 
+# [: "string"
+# [:
+# 
+:log
+       2 -write-all [ 203 syscall/exit ] $.callIf
+  "\n" 2 -write-all [ 204 syscall/exit ] $.callIf
+;
+
+# does not return
+# 
+# [: "string"
+# n/a
+# 
+:panic 
+  log
+  1 syscall/exit
+;
+
+# does not return
+# 
+# [: exitcode
+# n/a
+# 
+:exit
+  syscall/exit
+;

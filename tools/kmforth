@@ -11,6 +11,8 @@ import optparse
 import contextlib
 import re
 
+G_SHOW_EXPANSIONS = False
+
 NUMBERS  = set( '0123456789' )
 LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz' )
 
@@ -24,16 +26,37 @@ def log( *args, **kwargs ):
     print( *args, **kwargs )
 
 def main():
-    
-    options, free = optparse.OptionParser().parse_args()
+    parser = optparse.OptionParser()
+    parser.add_option(
+        '--library-path'    ,
+        dest='libraryPath'  ,
+        default='./library' ,
+    )
+    parser.add_option(
+        '--show-expansions'   ,
+        action='store_true'   ,
+        dest='showExpansions' ,
+        default=False         ,
+    )
+    options, free = parser.parse_args()
     if len( free ) != 1:
         raise Exception( 'usage: kmforth <path/to/file/to/compile>' )
     
+    if free[0] == "":
+        raise Exception( 'empty target path' )
+    
+    if options.showExpansions:
+        global G_SHOW_EXPANSIONS
+        G_SHOW_EXPANSIONS = True
+    
+    target = os.path.normpath( os.path.join( os.getcwd(), free[0] ) )
+    
     seen    = set()
     pending = [ FileSource(
-        origin = '(main compilation target)' ,
-        cwd    = os.getcwd()                 ,
-        path   = free[0]                     ,
+        origin      = '(main compilation target)' ,
+        cwd         = os.getcwd()                 ,
+        path        = target                      ,
+        libraryPath = options.libraryPath         ,
     )]
     
     allNames  = set()
@@ -91,6 +114,7 @@ def main():
                 elif definition.definition_type() == 'include':
                     # includes can be specified all over
                     # we just discard all repeat references
+                    
                     norm = os.path.normpath( definition.path() )
                     if norm not in seen:
                         pending.append( definition )
@@ -152,17 +176,19 @@ class FileSource:
     NN = 0
     
     def __init__(
-        self   ,
-        origin ,
-        cwd    ,
-        path   ,
+        self        ,
+        origin      ,
+        cwd         ,
+        path        ,
+        libraryPath ,
     ):
         self._fileno = self.NN
         self.NN += 1
         
-        self._origin = origin
-        self._cwd    = cwd
-        self._path   = path
+        self._origin      = origin
+        self._cwd         = cwd
+        self._path        = path
+        self._libraryPath = libraryPath
         return
     
     def fileno( self ):
@@ -174,15 +200,32 @@ class FileSource:
     def path(
         self ,
     ):
-        return os.path.join(
-            self._cwd  ,
-            self._path ,
-        )
+        if (
+            self._path.startswith('/')
+            or
+            self._path.startswith('./')
+            or
+            self._path.startswith('../')
+        ):
+            return os.path.join(
+                self._cwd  ,
+                self._path ,
+            )
+        else:
+            return os.path.join(
+                self._libraryPath ,
+                self._path        ,
+            )
     
     def cwd_for_includes(
         self, 
     ):
         return os.path.dirname( self.path() )
+    
+    def library_path(
+        self ,
+    ):
+        return self._libraryPath
     
     def read_source(
         self ,
@@ -294,6 +337,14 @@ class Token:
             repr( self._kind     ),
             repr( self._value    ),
         )
+    
+    def simple( self ):
+        if self.kind() == 'string':
+            return repr( self._value )
+        elif self.kind() == 'code':
+            return '`' + repr( self._value )[1:-1] + '`'
+        else:
+            return str(self._value)
 
 def parse_characters( data, fileSource ):
     assert isinstance( data, str )
@@ -408,7 +459,6 @@ def extract_string( initial, characters ):
     
     value = ''.join( bits )
     
-    # TODO, eventually modify this so @'s can be \escaped
     kind = 'string'
     if '@' in value:
         kind = 'macrostring'
@@ -809,6 +859,12 @@ class NamedFunction:
             repr( len( self._body.commands() ) ) ,
         )
     
+    def simple( self ):
+        return ': %s %s ;' % (
+            self._name.simple()                                       ,
+            ' '.join( bit.simple() for bit in self._body.commands() ) ,
+        )
+    
     def definition_type( self ):
         return 'function'
     
@@ -915,9 +971,10 @@ def parse_include( initial, tokens, currentModule ):
         raise Exception( 'expected ; after path, found %s' % repr( end ) )
     
     return FileSource(
-        origin = '(included from file=%s)' % currentModule.path() ,
-        cwd    = currentModule.cwd_for_includes()                 ,
-        path   = path.value()                                     ,
+        origin      = '(included from file=%s)' % currentModule.path() ,
+        cwd         = currentModule.cwd_for_includes()                 ,
+        path        = path.value()                                     ,
+        libraryPath = currentModule.library_path()                     ,
     )
 
 class MacroContext:
@@ -984,10 +1041,10 @@ class MacroContext:
             return self._macrovars[ name ]
     
     def expand_macrovar( self, name ):
-        if '@' in name.value()[1:]:
-            return self._interpolate_word( name )
-        else:
+        if re.match( '^[@][A-Za-z][A-Za-z0-9]*$', name.value() ):
             return self._as_is( name )
+        else:
+            return self._interpolate_word( name )
     
     def _as_is( self, name ):
         if self.has_macrovar( name.value() ):
@@ -1006,6 +1063,15 @@ class MacroContext:
                 return vv.value()
             elif vv.kind() == 'integer':
                 return str( vv.value() )
+            elif isinstance( vv, MacroList ):
+                raise Exception(
+                    (
+                        'you cannot expand a macrovar containing a macrolist that is touching anything else.' 
+                        ' expansion rules are applied in parameters only.'
+                        ' they interpolate in expansions.'
+                        ' erroneous expansion: %s'
+                    ) % repr( name )
+                )
             else:
                 raise Exception( 'some type I did not check for interpolation compatibility: %s' % repr( vv ) )
         
@@ -1013,7 +1079,7 @@ class MacroContext:
         
         if not interpolated:
             raise Exception( 'is this even possible?' )
-        elif interpolated[0] not in WORDSTART:
+        elif interpolated[0].lower() not in WORDSTART:
             raise Exception( 'interpolation of %s created illegal word %s starting with non-wordstart: %s' % (
                 repr( name )            ,
                 repr( interpolated )    ,
@@ -1021,7 +1087,7 @@ class MacroContext:
             ))
         else:
             for ii in interpolated[1:]:
-                if ii not in WORDBITS:
+                if ii.lower() not in WORDBITS:
                     raise Exception(
                         'interpolation of %s create illegal word %s containing non-wordbit: %s' % (
                             repr( name )         ,
@@ -1212,6 +1278,7 @@ def parse_macro_parameter(
         'incr'        : ExpansionRuleIncr        ,
         'expandIf'    : ExpansionRuleExpandIf    ,
         'expandIfNot' : ExpansionRuleExpandIfNot ,
+        'ifNotEmpty'  : ExpansionRuleIfNotEmpty  ,
         'equal'       : ExpansionRuleEqual       ,
         'lessThan'    : ExpansionRuleLessThan    ,
         'greaterThan' : ExpansionRuleGreaterThan ,
@@ -1236,9 +1303,9 @@ class MacroParameter:
         namer    ,
         expander ,
     ):
-        self._initial        = initial
-        self._namer          = namer
-        self._expander       = expander
+        self._initial  = initial
+        self._namer    = namer
+        self._expander = expander
         return
     
     def __repr__(
@@ -1257,6 +1324,19 @@ class MacroParameter:
     
     def consumes_argument( self ):
         return self._expander.consumes_argument()
+
+class Variations:
+    def __init__(
+        self  ,
+        value ,
+    ):
+        self._values = [ value ]
+    
+    def variations(
+        self ,
+    ):
+        for value in self._values:
+            yield value
 
 class ExpanderScalar:
     def __init__(
@@ -1277,8 +1357,8 @@ class ExpanderScalar:
         else:
             return self._expansionRules[0].consumes_argument()
     
-    def variations( self, source ):
-        
+    def variations( self, value ):
+        source = Variations( value )
         for rule in self._expansionRules:
             source = rule( source )
         
@@ -1306,74 +1386,72 @@ class ExpanderMacroList:
     def consumes_argument( self ):
         return True
     
-    def variations( self, source ):
+    def variations( self, value ):
         
-        for value in source.variations():
+        if value.kind() != 'macrolist':
+            raise Exception( 'cannot deconstruct a non-macrolist: %s' % repr( value ) )
+        
+        bits = value.bits()
+        
+        if len( bits ) == 0:
+            yield MacroList(
+                location = value.location() ,
+                bits     = []               ,
+            )
+            return
+        
+        if len( bits ) != len( self._parameterList ):
+            raise Exception( 'expected macrolist to have %s entries: %s' % (
+                len( self._parameterList ) ,
+                repr( value )              ,
+            ))
+        
+        root  = self._parameterList[ 0 ].expander().variations( bits[0] )
+        first = next( root, None )
+        if first == None:
+            return
+        
+        walk = [ [root,first] ]
+        
+        while True:
             
-            if value.kind() != 'macrolist':
-                raise Exception( 'cannot deconstruct a non-macrolist: %s' % repr( value ) )
+            # add additional items to fill out the structure
+            # 
+            while len( walk ) < len( bits ):
+                ii = len( walk )
+                ss = self._parameterList[ ii ].expander().variations( bits[ii] )
+                vv = next( ss, None )
+                if vv == None:
+                    break
+                else:
+                    walk.append( [ss,vv] )
             
-            bits = value.bits()
-            
-            if len( bits ) == 0:
-                yield MacroList(
-                    location = value.location() ,
-                    bits     = []               ,
+            # if we filled a tuple, pass it out
+            if len( walk ) == len( bits ):
+                mm = MacroList(
+                    location = value.location()               ,
+                    bits     = list( bb for (aa,bb) in walk ) ,
                 )
-                return
+                yield mm
             
-            if len( bits ) != len( self._parameterList ):
-                raise Exception( 'expected macrolist to have %s entries: %s' % (
-                    len( self._parameterList ) ,
-                    repr( value )              ,
-                ))
+            # update the rearmost item
+            # remove it if it returns none
+            # repeat.
+            # 
+            while walk:
+                vv = next( walk[-1][0], None )
+                if vv == None:
+                    walk.pop()
+                    continue
+                else:
+                    walk[-1][1] = vv
+                    break
             
-            root  = self._parameterList[ 0 ].expander().variations( bits[0] )
-            first = next( root, None )
-            if first == None:
-                return
-            
-            walk = [ [root,first] ]
-            
-            while True:
-                
-                # add additional items to fill out the structure
-                # 
-                while len( walk ) < len( bits ):
-                    ii = len( walk )
-                    ss = self._parameterList[ ii ].expander().variations( bits[ii] )
-                    vv = next( ss, None )
-                    if vv == None:
-                        break
-                    else:
-                        walk.append( [ss,vv] )
-                
-                # if we filled a tuple, pass it out
-                if len( walk ) == len( bits ):
-                    mm = MacroList(
-                        location = value.location()               ,
-                        bits     = list( bb for (aa,bb) in walk ) ,
-                    )
-                    yield mm
-                
-                # update the rearmost item
-                # remove it if it returns none
-                # repeat.
-                # 
-                while walk:
-                    vv = next( walk[-1][0], None )
-                    if vv == None:
-                        walk.pop()
-                        continue
-                    else:
-                        walk[-1][1] = vv
-                        break
-                
-                # stop if the initial variation returned none and was therefore removed
-                if not walk:
-                    return
-                
-        raise Exception( 'hmm' )
+            # stop if the initial variation returned none and was therefore removed
+            if not walk:
+                break
+        
+        return
         
 class NamerMacroList:
     def __init__(
@@ -1416,12 +1494,58 @@ class ExpansionRuleEach:
                 raise Exception( '.each expected macrolist, found: %s' % repr( value ) )
             
             for bit in value.bits():
-                for token in bit.variations():
-                    yield token
+                yield bit
 
 class ExpansionRuleCount: pass
-class ExpansionRuleFirst: pass
-class ExpansionRuleRest: pass
+
+class ExpansionRuleFirst:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+        
+    def variations(
+        self ,
+    ):
+        for value in self._source.variations():
+            if value.kind() != 'macrolist':
+                raise Exception( '.first expected a macrolist, found %s' % repr( value ) )
+            
+            if value.bits():
+                yield value.bits()[0]
+            else:
+                raise Exception( '.first received a macrolist with no entries: %s' % repr( value ) )
+    
+class ExpansionRuleRest:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+        
+    def variations(
+        self ,
+    ):
+        for value in self._source.variations():
+            if value.kind() != 'macrolist':
+                raise Exception( '.rest expected a macrolist, found %s' % repr( value ) )
+            
+            if value.bits():
+                yield MacroList(
+                    location = value.location() ,
+                    bits     = value.bits()[1:] ,
+                )
+            else:
+                raise Exception( '.rest received a macrolist with no entries: %s' % repr( value ) )
 
 class ExpansionRuleToZero:
     @staticmethod
@@ -1526,6 +1650,28 @@ class ExpansionRuleIncr:
 
 class ExpansionRuleExpandIf: pass
 class ExpansionRuleExpandIfNot: pass
+    
+class ExpansionRuleIfNotEmpty:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self   ,
+        source ,
+    ):
+        self._source = source
+        
+    def variations(
+        self ,
+    ):
+        for value in self._source.variations():
+            if value.kind() != 'macrolist':
+                raise Exception( '.ifNotEmpty expected a macrolist, found %s' % repr( value ) )
+            
+            if value.bits():
+                yield value
+
 class ExpansionRuleEqual: pass
     
 class ExpansionRuleLessThan:
@@ -1672,7 +1818,7 @@ def capture_balanced_bits_til_terminator(
         bit = tokens.peek()
         if bit == None:
             raise Exception(
-                'ran out of tokens while collecting statement'
+                'ran out of tokens while collecting statement: firstbit=%s' % repr( (bits and bits[0]) or None )
             )
         
         if bit.kind() in [ '[', '{', '(' ]:
@@ -1832,6 +1978,14 @@ class NamedMacroExpansion:
             repr( self._arguments ) ,
         )
     
+    def simple(
+        self ,
+    ):
+        return '@ %s ( %s )' % (
+            self._macroName.simple()                            ,
+            ' '.join( arg.simple() for arg in self._arguments ) ,
+        )
+    
     def initial( self ):
         return self._initial
     
@@ -1883,20 +2037,9 @@ def parse_macro_expansion_argument(
     
     tokens.take()
     
-    if pp.kind() == 'word':
-        if '@' in pp.value():
-            return ExpandableWordTemplate( pp )
-        else:
-            return ExpandableWordLiteral( pp )
-    elif pp.kind() == 'macrovar':
-        if '@' in pp.value():
-            return ExpandableWordTemplate( pp )
-        else:
-            return ExpandableMacrovar( pp )
-    elif pp.kind() == 'integer':
-        return ExpandableInteger( pp )
-    elif pp.kind() == 'string':
-        return ExpandableString( pp )
+    if pp.kind() in [ 'word', 'macrovar', 'integer', 'string', 'macrolist' ]:
+        return pp
+    
     elif pp.kind() == '[':
         bits = parse_macro_expansion_arguments(
             initial ,
@@ -1913,6 +2056,7 @@ def parse_macro_expansion_argument(
             ))
         
         return ExpandableLambda( pp, bits )
+    
     elif pp.kind() == '(':
         bits = parse_macro_expansion_arguments(
             initial ,
@@ -1928,81 +2072,13 @@ def parse_macro_expansion_argument(
                 repr( closer ) ,
             ))
         
-        return ExpandableMacroList( MacroList(
+        return MacroList(
             location = pp.location() ,
             bits     = bits          ,
-        ))
-    elif pp.kind() == 'macrolist':
-        return ExpandableMacroList( pp )
+        )
     else:
         raise Exception( 'unknown bit in macro expansion variables: %s' % repr( pp ) )
     
-class ExpandableWordTemplate:
-    def __init__(
-        self  ,
-        value ,
-    ):
-        self._value = value
-        
-class ExpandableWordLiteral:
-    def __init__(
-        self  ,
-        value ,
-    ):
-        self._value = value
-        
-    def __repr__(
-        self ,
-    ):
-        return '<ExpandableWordLiteral value=%s>' % repr( self._value )
-    
-    def variations( self ):
-        yield self._value
-
-class ExpandableMacrovar:
-    def __init__(
-        self  ,
-        value ,
-    ):
-        self._value = value
-        
-class ExpandableInteger:
-    def __init__(
-        self  ,
-        value ,
-    ):
-        self._value = value
-        return
-    
-    def __repr__(
-        self ,
-    ):
-        return '<ExpandableInteger value=%s>' % (
-            repr( self._value ) ,
-        )
-    
-    def variations( self ):
-        yield self._value
-
-class ExpandableString:
-    def __init__(
-        self  ,
-        value ,
-    ):
-        self._value = value
-    
-    def variations( self ):
-        yield self._value
-
-class ExpandableLambda:
-    def __init__(
-        self    ,
-        initial ,
-        bits    ,
-    ):
-        self._initial = initial
-        self._bits    = bits
-
 class MacroList:
     def __init__(
         self     ,
@@ -2017,6 +2093,13 @@ class MacroList:
     ):
         return '<MacroList contents=%s>' % repr( self._bits )
     
+    def simple(
+        self ,
+    ):
+        return '( %s )' % (
+            ' '.join( str( bit.simple() ) for bit in self._bits ) ,
+        )
+    
     def kind( self ):
         return 'macrolist'
     
@@ -2025,21 +2108,6 @@ class MacroList:
     
     def bits( self ):
         return self._bits
-        
-class ExpandableMacroList:
-    def __init__(
-        self  ,
-        value ,
-    ):
-        self._value = value
-        
-    def __repr__(
-        self ,
-    ):
-        return '<ExpandableMacroList contents=%s>' % repr( self._value )
-    
-    def variations( self ):
-        yield self._value
 
 #####
 
@@ -2059,6 +2127,9 @@ def expand_macro(
     macroExpansion ,
     macroContext   ,
 ):
+    if G_SHOW_EXPANSIONS:
+        log( 'EXPANDING', macroExpansion.simple() )
+    
     if not macroContext.has_macro( macroExpansion.macro_name().value() ):
         raise Exception( 'unknown macro definition: %s' % macroExpansion.macro_name() )
     
@@ -2092,6 +2163,8 @@ def expand_macro(
                     macroContext  = macroContext                          ,
                 )
                 expandedFunctions.append( expandedFunction )
+                if G_SHOW_EXPANSIONS:
+                    log( 'EXPANDED-FUNCTION', expandedFunction.simple() )
                 
             elif unexpandedDefinition.initial().kind() == '@': # or macrovar?
                 
@@ -2248,7 +2321,6 @@ def expand_bitstream(
                 macroContext = macroContext ,
                 macroCode    = bit          ,
             )
-                
         elif bit.kind() == 'macrolist':
             yield bit
         elif bit.kind() in [ ';', '{', '}', '[', ']', '(', ')', 'localfn', 'word', 'integer', 'string', 'code' ]:
@@ -2452,14 +2524,20 @@ def extract_local_macro_arguments(
 # this includes anything that's in any function ( because we just modified a scanner )
 # 
 def analyze_functions( allFns ):
-    usedFns = set()
+    
+    callgraph = {}
+    
+    # scan everything and build a graph of what functions reference each other
+    # 
     for fn, dd in allFns.items():
+        if fn not in callgraph:
+            callgraph[ fn ] = set()
         for cc in dd.body().commands():
             if cc.kind() == 'word':
                 if (cc.value()) not in allFns:
-                    raise Exception( 'unknown function in %s: %s' % ( repr( dd ), repr( cc ) ) )
+                    raise Exception( 'unknown function called in %s: %s' % ( repr( dd ), repr( cc ) ) )
                 else:
-                    usedFns.add( cc.value() )
+                    callgraph[ fn ].add( cc.value() )
             elif cc.kind() == 'string':
                 pass
             elif cc.kind() == 'code':
@@ -2470,23 +2548,38 @@ def analyze_functions( allFns ):
                 pass
             elif cc.kind() == 'fnref':
                 if cc.value() not in allFns:
-                    raise Exception( 'unknown function in %s: %s' % ( repr( dd ), repr( cc ) ) )
+                    raise Exception( 'address of unknown function taken in %s: %s' % ( repr( dd ), repr( cc ) ) )
                 else:
-                    usedFns.add( cc.value() )
+                    callgraph[ fn ].add( cc.value() )
             elif cc.kind() == 'subfn':
                 if cc.value() not in allFns:
-                    # import json
-                    # log( 'ALLFNS', json.dumps( list(allFns.keys()), indent = True ) )
                     raise Exception( 'missing lambda in %s: %s' % ( repr( dd ), repr( cc ) ) )
                 else:
-                    usedFns.add( cc.value() )
+                    callgraph[ fn ].add( cc.value() )
             else:
                 raise Exception( 'unexpected command form: %s' % repr( cc ) )
     
+    # they have to define a :_start function
+    # by default, it's in the library/STANDARD
+    # and calls :main after initialization
+    # 
     if 'kmfn__5f_start' not in allFns:
-        raise Exception( 'no :_start function' )
-    else:
-        usedFns.add( 'kmfn__5f_start' )
+        raise Exception( 'no :_start function ( forget to @ "STANDARD" ; ? )' )
+    
+    # walk from :_start down and figure out what
+    # functions are actually used in the current
+    # program
+    # 
+    usedFns = set()
+    pending = [ 'kmfn__5f_start' ]
+    while pending:
+        pp = pending.pop()
+        if pp in usedFns:
+            continue
+        else:
+            usedFns.add( pp )
+            for callee in callgraph[ pp ]:
+                pending.append( callee )
     
     return usedFns
 
@@ -2677,7 +2770,7 @@ def generate_code(
                     elif memberfn == 'addr':
                         # maybe replace this with &$local later?
                         code.append( '    ; push address of local (%s) onto stack\n' % repr( localName ) )
-                        code.append( '    lea  rax,[r15-8*%d], %\n' % (slotno+1) )
+                        code.append( '    lea  rax,[r15-8*%d]\n' % (slotno+1) )
                         code.append( '    mov  [r14],rax\n' )
                         code.append( '    add  r14,8\n' )
                     else:

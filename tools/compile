@@ -11,5 +11,5 @@ esac
 
 ./tools/kmforth "$TARGET" > bld/SOURCE.asm || die failed to compile forth into asm
 nasm -felf64 -Fdwarf -g -o bld/SOURCE.o bld/SOURCE.asm || die failed to compile asm into object library
-ld -o bld/SOURCE.out bld/SOURCE.o || die failed to link object library into executable
+ld -static -o bld/SOURCE.out bld/SOURCE.o || die failed to link object library into executable
 cp bld/SOURCE.out a.out || die failed to copy executable into current directory

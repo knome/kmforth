@@ -1,0 +1,60 @@
+
+# [: size
+# [: regionaddr err
+# 
+:memory/map-region { $size }
+  $size.set
+  syscall/mmap/no-fd
+  syscall/mmap/prot-read syscall/mmap/prot-write or
+  syscall/mmap/map-private syscall/mmap/map-anonymous or
+  syscall/mmap/place-anywhere
+  syscall/mmap/no-offset
+  $size.get
+  syscall/mmap
+;
+
+# all values go in and out of rax register
+# or its variants
+# 
+@ memory/-define-peekpokes (
+  ( q 8 qword mov   rax rbx)
+  ( d 4 dword mov   eax ebx)
+  ( w 2 word  movzx rax bx )
+  ( b 1 byte  movzx rax bl )
+);
+
+% memory/-define-peekpokes (@def.each)
+  @ memory/-define-peekpoke-for @def ;
+;
+
+% memory/-define-peekpoke-for ((@sigil @size @mnemonic @mover @target @writeSource))
+  @ memory/-define-peekpoke @sigil @mnemonic @mover @target @writeSource ;
+  @ memory/-define-peekpoke @size  @mnemonic @mover @target @writeSource ;
+;
+
+% memory/-define-peekpoke (@name @mnemonic @mover @target @writeSource)
+  
+  # [: sourceAddr
+  # [: value
+  # 
+  :memory/peek-@name
+    `
+    mov     rax,[r14-8]
+    @mover@ @target@, @mnemonic@ [rax]
+    mov     [r14-8],rax
+    `
+  ;
+  
+  # [: destAddr value
+  # [: 
+  # 
+  :memory/poke-@name
+    `
+    sub r14,8     ; get value
+    mov rbx,[r14]
+    sub r14,8     ; get destination address
+    mov rax,[r14]
+    mov [rax],@writeSource@
+    `
+  ;
+;

@@ -1,0 +1,64 @@
+#!/bin/bash
+# -*- shell-script -*-
+
+log(){ >&2 echo "$@" ; }
+die(){ log "$@" ; exit 1 ; }
+
+standard(){
+    ./tools/compile $TESTPATH/TEST || die "failed to compile test $TESTPATH/TEST" ;
+    
+    EXPECTEDCODE="0"
+    if [ -e "$TESTPATH/EXITCODE" ] ; then
+        EXPECTEDCODE="$( cat "$TESTPATH/EXITCODE" )"
+    fi
+    
+    EXPECTEDOUT=""
+    if [ -e "$TESTPATH/STDOUT" ] ; then
+        EXPECTEDOUT="$( cat "$TESTPATH/STDOUT" )" ;
+    fi
+    
+    EXPECTEDERR=""
+    if [ -e "$TESTPATH/STDERR" ] ; then
+        EXPECTEDERR="$( cat "$TESTPATH/STDERR" )" ;
+    fi
+    
+    ./a.out >bld/STDOUT 2>bld/STDERR
+    CODE="$?"
+    OUT="$( cat bld/STDOUT )"
+    ERR="$( cat bld/STDERR )"
+    
+    if ! [ "$EXPECTEDCODE" -eq "$CODE" ]; then
+        log "ERROR expected=$EXPECTEDCODE code=$CODE"
+        die "test failed"
+    fi
+    
+    if ! [ "$EXPECTEDOUT" == "$OUT" ]; then
+        log "ERROR:"
+        log
+        log "expected:"
+        log "$EXPECTEDOUT"
+        log 
+        log "received:"
+        log "$OUT"
+        log
+        die "test failed"
+    fi
+    
+    if ! [ "$EXPECTEDERR" == "$ERR" ]; then
+        log "ERROR:"
+        log
+        log "expected:"
+        log "$EXPECTEDERR"
+        log
+        log "received:"
+        log "$ERR"
+        log
+        die "test failed"
+    fi
+}
+
+for TESTPATH in tests/* ;
+do
+    log "running test $TESTPATH/TEST" ;
+    standard "$TESTPATH"
+done

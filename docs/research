@@ -1,0 +1,15 @@
+
+# https://gaultier.github.io/blog/x11_x64.html#x11-basics
+  X11 pure assembly, very nice
+
+# searchable syscall table
+  https://filippo.io/linux-syscall-table/
+
+# how to call X from asm ( actually useless since it uses the lib )
+  https://gist.github.com/nikAizuddin/6fbbc703f1213ab61a8a
+
+# errno codes for linux ( from chromium )
+  https://chromium.googlesource.com/chromiumos/docs/+/master/constants/errnos.md
+
+# file opening option codes current linux
+  https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/fcntl.h

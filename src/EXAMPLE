@@ -1,9 +1,23 @@
 
 @ "STANDARD" ;
 
-:constant/megabyte 1024 1024 * ;
-
-:main
-  "hello, world" write
+:main { $test }
+  200000                                # [: size
+  gc/arena                              # [: arena-addr err
+  "failed to allocate arena" dieOnError # [: arena-addr
+  
+  0 $test.set $test.addr
+  dup 0 65 chars//data.nth.set
+  dup 1 66 chars//data.nth.set
+  dup 2 67 chars//data.nth.set
+  
+  write
+  
   0 exit
 ;
+
+% chars (@rc @st)
+  @ @rc @st ( (data type/u8) ) ;
+;
+
+@ struct/define chars ;

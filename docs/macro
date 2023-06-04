@@ -1,0 +1,111 @@
+
+*(see STANDARD-ERRNO for actual usage examples)*
+
+% name () ... ;   # named macro, expansions defines functions and triggers additional macro expansions
+@ name ... ;      # macro expansion, defines functions, recursively expanding expansions in macros
+@ ( () () ... )   # local macro, inlines code, takes args, params and code to expand
+
+"@hello@ @@ @world@" --> "hello @ world"
+
+a macro parameter can be a @macrovar, word, "string", 3 number, [lambda] or a paren list of any of these, recursively.
+
+in params, macro parameters can either be @bare or have @expansion.rules suffixed to them
+
+the expansion rules dictate repetition of expansion and manipulation of variables.
+
+params can also have arguments which arg not passed with riders giving them special purpose when expanding.
+
+these special forms must always follow the arg receiving ones.
+
+# examples. because that's all anyone really wants
+
+## named macro notes
+
+if you `@name` when you should `@ name`, you're gonna have a bad day
+
+## local macro expansion examples
+
+first simple parameter expansion into a string
+
+    @ ( ("world") (@what) "hello @what@" write )
+      ===>
+    "hello world" write
+
+if you make a macro-list () of parameters, you can tell the parameter to expand the code for each of them
+
+    @ ( (("dog" "cat" "fish" "bird")) (@what.each) "hello @what@" write )
+      ==>
+    "hello dog" write "hello cat" write "hello fish" write "hello bird" write
+
+macros can expand recursively
+
+    @ ( (cool (beans man))
+        (@adjective @nouns)
+        @ (
+            (@nouns)
+            (@noun.each)
+            
+            @adjective hello/@noun
+        )
+    )
+      ===>
+    cool hello/beans cool hello/man
+
+not that you would have had to in that case
+
+    @ ( (cool (beans man)) (@adjective @noun.each) @adjective hello/@noun ) ==> cool hello/beans cool hello/man
+
+# expansion rules
+
+| @name.each     | arg is list, macro expands for each item in that list                                      |
+| @name.count    | arg is list, macro expands to the number of items in that list                             |
+| @name.first    | arg is list, macro expands to first item in said list                                      |
+| @name.rest     | arg is list, macro expands to all but first item in said list                              |
+| @name.toZero   | arg is number, repeat macro decreasing value till 0, post-decrement 10 -> {9 8 ... 1 0}    |
+| @name.toOne    | arg is number, repeat macro decreasing value till 0, pre-decrement 10 -> {10 9 ... 2 1}    |
+| @name.decr     | arg is number, except one less                                                             |
+| @name.incr     | arg is number, except one more                                                             |
+| @name.expandno | name will have the repetition of expansion for the current set of macro parameters         |
+| @name.globalno | name will contain an arbitrary globally unique integer ( values are shared by all macros ) |
+| @.expandIf     | arg is list or number, current macro only expands if value is truthy                       |
+| @.expandIfNot  | arg is list or number, current macro only expands if value is falsy                        |
+| @.equal        | arg is list, expands to 1 if all items are equal, 0 otherwise                              |
+| @.lessThan     | arg is list, expands to 1 if items grow smaller from left to right, 0 otherwise            |
+| @.greaterThan  | arg is list, expands to 1 if items grow greater from left to right, 0 otherwise            |
+| @.ignore       | arg is ignored ( just a placeholder param )                                                |
+| ( ... )        | names only, deconstruct a list into those variables                                        |
+
+first and last error on empty inputs ( .rest returns () )
+each is fine with empty lists ( just doesnt expand anything )
+decr errors on negative inputs
+equal, lessthan and greaterthan error compilation on empty lists
+
+yes, the named macro expansions are obviously trivially turing complete. no, I don't care.
+
+## examples
+
+if a macrovar is touching anything when it expands, it binds to that thing. so use spaces. or don't. it's your code.
+
+@ ( ((a b c) (1 2 3)) (@letter.each @number.each) @letter@number ) ==> a1 a2 a3 b1 b2 b3 c1 c2 c3
+
+@ ( (5) (@v.decr) @v @v + ) ==> 4 4 +
+
+@ ( ((hello world)) (@what.each @cc.expandno) @cc some-module/@what ) ==> 0 some-module/hello 1 some-module/world
+
+@ ( ((cool) ()) ($values $.expandIf) whatever this is is not getting expanded)
+@ ( ((beans) 0) ($values $.expandIf) this either
+
+@( ((some list of stuff)) (@thelist)
+    @( (@thelist) (@.expandIf) "the list has items" write )
+    @( (@thelist) (@.expandIfNot) "the list lacks items" write )
+)
+
+# a macro that takes no args always expands, though I doubt it will often be useful
+# 
+@( () (@someId.globalno) "id/@someId" register-something-unique )
+
+you can also do horrific stuff like this:
+
+  ( (5) (@vv.toOne.toOne.toOne.toOne.toOne) "hi: @vv@" write )
+
+but don't. unless it's cool.

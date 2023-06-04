@@ -1,4 +1,8 @@
 
+# 
+# stack manipulation functions
+# 
+
 :dup
   `
   mov rax, [r14-8] ; push whatever is on the top again

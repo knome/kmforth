@@ -52,3 +52,22 @@
   $loop.get   # [: loop
   $.jump      # [: 
 ;
+
+# [: cond onIf onElse
+# [: 
+:if { $onElse }
+  
+  # clear the stack of cond and branches
+  # 
+  $onElse.set # [: cond onIf
+  $onIf.set   # [: cond
+  $cond.set   # [: 
+  
+  # call onIf if the condition was truthy
+  # 
+  $cond.get $onIf.get $.callIf $cond.get $.leaveIf
+  
+  # otherwise call the default else branch
+  # 
+  $onElse call
+;

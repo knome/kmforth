@@ -3,12 +3,13 @@
 # 
 :>
   `
+  ; op >
   sub r14,8      ; right
   mov rax, [r14] ;
   sub r14,8      ; left
   mov rbx, [r14] ; 
   cmp rbx,rax
-  jg  .more
+  jg  .more      ; signed comparison
   mov qword [r14], 0
   add r14, 8
   jmp .out
@@ -23,12 +24,13 @@
 # 
 :<
   `
+  ; op <
   sub r14,8      ; right
   mov rax, [r14] ;
   sub r14,8      ; left
   mov rbx, [r14] ; 
   cmp rbx,rax
-  jl  .less
+  jl  .less      ; signed comparison
   mov qword [r14], 0
   add r14, 8
   jmp .out
@@ -41,6 +43,7 @@
 
 :+
   `
+  ; op +
   sub r14,8      ; right
   mov rax, [r14] ; 
   sub r14,8      ; left
@@ -53,6 +56,7 @@
 
 :-
   `
+  ; op -
   sub r14,8      ; right
   mov rax, [r14] ; 
   sub r14,8      ; left
@@ -65,6 +69,7 @@
 
 :/
   `
+  ; op /
   sub r14,8      ; right
   mov rbx, [r14] ; 
   sub r14,8      ; left
@@ -78,6 +83,7 @@
 
 :%
   `
+  ; op %
   sub r14,8      ; right
   mov rbx, [r14] ; 
   sub r14,8      ; left
@@ -91,6 +97,7 @@
 
 :*
   `
+  ; op *
   sub r14,8      ; right
   mov rbx, [r14] ; 
   sub r14,8      ; left
@@ -104,6 +111,7 @@
 
 :or
   `
+  ; op or
   sub r14, 8     ; right
   mov rax, [r14] ;
   sub r14, 8     ; left
@@ -116,16 +124,30 @@
 
 :==
   `
+  ; op ==
   sub r14, 8     ; right
   mov rbx, [r14] ;
   sub r14, 8     ; left
   mov rax, [r14] ; 
-  sub rax, rbx   ;
-  mov rax, 0     ;
+  sub rax, rbx
   jnz .bad
-  add rax, 1     ;
+  mov qword [r14],1
+  add r14,8
+  jmp .done
  .bad:
-  mov [r14], rax ;
-  add r14, 8
+  mov qword [r14],0
+  add r14,8
+ .done:
   `
+;
+
+# [: left right
+# 
+:<= { $right }
+  $right.set         # [: left
+  
+  dup                # [: left left
+  $right.get <       # [: left (left<right)
+  swap $right.get == # [: (left<right) (left==right)
+  or                 # [: (left<right|left==right)
 ;

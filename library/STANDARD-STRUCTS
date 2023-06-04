@@ -1,0 +1,149 @@
+
+# we might alter this in the future so that the caller defines a macro that accepts a macro to expand
+# in order to define the fields, and then calls the defining macro using the name of their field macro.
+# the advantage here is that field values would then be generally available as injectable values rather
+# than only existing in the expansion of a single macro, which will allow us to arbitrarily manipulate
+# them and recursively expand fields.
+# 
+# % my/type (%m %s)
+#   @ %m %s my/type ((field definitions) (go here)) ;
+# ;
+# 
+# @ struct/define my/type ;
+# 
+# :main my/type//go//subfield//othersubfield.set
+# 
+# or something like that
+
+#####
+
+:type/u8.size 1             ;
+:type/u8.set  memory/poke-b ;
+:type/u8.get  memory/peek-b ;
+
+:type/u16.size 2             ;
+:type/u16.set  memory/poke-w ;
+:type/u16.get  memory/peek-w ;
+
+:type/u32.size 4 ;
+:type/u32.set  memory/poke-d ;
+:type/u32.get  memory/peek-d ;
+
+:type/u64.size 8 ;
+:type/u64.set  memory/poke-q ;
+:type/u64.get  memory/peek-q ;
+
+# for
+#   @ accessors structName ( (fieldName fieldType) )
+# expandsTo
+#   : structName/fieldName.get 'field offset calculation' 'type appropriate peek-q' ;
+#   : structName/fieldName.set 'field offset calculation' 'type appropriate poke-q' ;
+#   : structName/fieldName.size 'size calculation used in field offset calculations' ;
+#   etc
+# 
+% struct/define (@definition)
+  @ @definition struct/-with-definition @definition ;
+;
+
+% struct/-with-definition ( @name @fields )
+  @ struct/-define @name @fields ;
+;
+
+% struct/-define (@name @fields)
+  @ struct/-with-mapping-window struct/-define-field-accessors @name @fields ;
+  : @name.size 0 @( (@fields) (@f.each) @( (@f) ((@fn @ft)) @ft.size + ) ) + ;
+;
+
+% struct/-define-field-accessors ( @name @before (@fieldName @fieldType) @after )
+  
+  # [: structaddr
+  # [: fieldvalue
+  # 
+  : @name//@fieldName.get
+    @name//@fieldName.addr
+    @fieldType.get
+  ;
+  
+  # [: structaddr value
+  # [: 
+  # 
+  : @name//@fieldName.set { $value }
+    $value.set
+    @name//@fieldName.addr
+    $value.get
+    @fieldType.set
+  ;
+  
+  # [: 
+  # [: size
+  # 
+  : @name//@fieldName.size
+    @fieldType.size
+  ;
+  
+  # [: structaddr
+  # [: fieldaddr
+  # 
+  : @name//@fieldName.addr
+    0 @( (@before) (@b.each) @( (@b) ((@fn @ft)) @ft.size + ) ) +
+  ;
+  
+  # these following accessors depend on the user to know
+  # when a field is an array and when it is not.
+  
+  # [: structaddr index
+  # [: &fieldValue[ index ]
+  # 
+  : @name//@fieldName.nth.addr { $index }
+    $index.set                     # [: structaddr
+    @name//@fieldName.addr         # [: fieldaddr
+    $index.get @fieldType.size * + # [: &fieldaddr[ index ]
+  ;
+  
+  # [: structaddr index
+  # [: fieldValue
+  # 
+  : @name//@fieldName.nth.get
+    @name//@fieldName.nth.addr # [: &fieldaddr[ index ]
+    @fieldType.get             # [: value
+  ;
+  
+  # [: structaddr index newValue
+  # [: 
+  # 
+  : @name//@fieldName.nth.set { $value }
+    $value.set                 # [: structaddr index
+    @name//@fieldName.nth.addr # [: &fieldaddr[ index ]
+    $value.get                 # [: &fieldaddr[ index ] value
+    @fieldType.set             # [:
+  ;
+  
+;
+
+# for
+#   @ hello (some state) (1 2 3 4 5)
+# expandsTo
+#   @ hello (some state) ()        1 (2 3 4 5)
+#   @ hello (some state) (1)       2 (3 4 5)
+#   @ hello (some state) (1 2)     3 (4 5)
+#   @ hello (some state) (1 2 3)   4 (5)
+#   @ hello (some state) (1 2 3 4) 5 ()
+# 
+% struct/-with-mapping-window (@todo @state @list)
+  @ struct/-with-mapping-window/ready @todo @state () @list ;
+;
+
+# % with-mapping-window/ready (hello state (a b c) (d e f))
+#   @ hello state (a b c) d (e f) ;
+#   @ struct/-with-mapping-window/ready hello state (a b c d) (e f)
+# ;
+# 
+% struct/-with-mapping-window/ready (@todo @state @prev @remaining.ifNotEmpty)
+  @ @todo @state @prev @( (@remaining) (@rf.first) @rf) @( (@remaining) (@rr.rest) @rr ) ;
+  @ struct/-with-mapping-window/ready
+    @todo
+    @state
+    ( @( (@prev) (@p.each) @p ) @( (@remaining) (@rf.first) @rf ) ) 
+    @( (@remaining) (@rr.rest) @rr )
+  ;
+;

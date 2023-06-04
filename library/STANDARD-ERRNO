@@ -20,7 +20,9 @@
 % errno/-define-strerror (@errors)
   : errno/strerror { $desc }
     
-    "unknown error" $desc.set
+    #                          # [: err
+    "unknown error"            # [: err defaultMsg
+    $desc.set                  # [: err
     
     @( (@errors) 
        (@error.each)
@@ -28,11 +30,22 @@
        @( (@error)
           ((@name @value @description))
           
-          dup $desc.get swap @value == [ pop @description ] $.callIf $desc.set
+          dup                  # [: err err
+          $desc.get            # [: err err curMsg
+          swap                 # [: err curMsg err
+          @value ==            # [: err curMsg isThisError
+          [
+            #            # [: err curMsg
+            pop          # [: err
+            @description # [: err newMsg
+          ]                    # [: err curMsg isThisError onIsThisError
+          $.callIf             # [: err curMsg | err newMsg {on called}
+          $desc.set            # [: err {keep the selected message or set the new one}
        )
     )
     
-    $desc.get
+    pop                        # [:
+    $desc.get                  # [: curMsg
   ;
 ;
 

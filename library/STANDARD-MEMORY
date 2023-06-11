@@ -58,3 +58,43 @@
     `
   ;
 ;
+
+# inefficient overlap safe memory move
+# 
+# [: dst src len
+# [: 
+# 
+: memory/memmove
+  
+  0 # [: dst src len thus
+  
+  [
+    { $dst $src $len $thus }
+    
+    $thus.set
+    $len.set
+    $src.set
+    $dst.set
+    
+    $dst.get $thus.get +
+      $src.get $thus.get + memory/peek-b
+    memory/poke-b
+    
+    $dst.get
+    $src.get
+    $len.get
+    $thus.get 1 +
+  ]
+  [ # checks if remaining has any left
+    { $thus $len }
+    
+    $thus.set $len.set    # grab the two values
+    $len.get $thus.get    # and replace them on the stack
+    
+    $thus.get $len.get <  # then push the comparison
+  ]
+  while
+  
+  pop pop pop pop
+  
+;

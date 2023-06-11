@@ -1,0 +1,24 @@
+
+locals are interspersed among the return addresses of the call stack
+
+without locals, it might look like this:
+
+  [ start-return-addr ][ main-return-addr ][ somefn-return-addr ][ otherfn-return-addr ] ...
+  
+start is the internal "prep everything for execution" function. it prepares
+a return for main to go to that just exits normally.
+
+with locals, it looks like this
+
+  [ start-return-addr][ main-return-addr][ last-local ][ penultimate-local ][ another ][ secondlocal ][first-local][ deeper-call-return-addr ][ more-deeper-call-return-addr ] ...
+  
+the first named local is first under the call-stack head when a function is called, putting it closest to the next return-addr.
+the last named local is furthest back in the call-stack, next to the return-addr for the function that bumped that local onto the stack.
+
+the main point is, if you try to use locals as contiguous 8byte chunks for a quick inline buffer, be sure to address that buffer with the last local, not the first
+
+    :main { $d $c $b $start } ; # if you overwrite start in this one from a subfn, it floods into b, then c, then d
+
+not
+
+    :main { $start $b $c $d } ; # if you overwrite start in this one from a subfn, it will overwrite its return address and you'll have a bad day

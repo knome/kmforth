@@ -118,6 +118,25 @@
     @fieldType.set             # [:
   ;
   
+  # [: structaddr
+  # [: 
+  : @name//@fieldName.incr { $fieldAddr }
+    @name//@fieldName.addr
+    $fieldAddr.set
+    $fieldAddr.get @fieldType.get
+    1 +
+    $fieldAddr.get swap @fieldType.set
+  ;
+  
+  # [: structaddr
+  # [: 
+  : @name//@fieldName.decr { $fieldAddr }
+    @name//@fieldName.addr
+    $fieldAddr.set
+    $fieldAddr.get @fieldType.get
+    1 -
+    $fieldAddr.get swap @fieldType.set
+  ;
 ;
 
 # for

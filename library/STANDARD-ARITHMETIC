@@ -122,6 +122,19 @@
   `
 ;
 
+:and
+  `
+  ; op and
+  sub r14,8     ; right
+  mov rax,[r14]
+  sub r14,8     ; left
+  mov rbx,[r14]
+  and rax,rbx
+  mov [r14],rax
+  add r14,8
+  `
+;
+
 :==
   `
   ; op ==
@@ -150,4 +163,12 @@
   $right.get <       # [: left (left<right)
   swap $right.get == # [: (left<right) (left==right)
   or                 # [: (left<right|left==right)
+;
+
+# left-shift
+# 
+# [: value shift-amount
+# 
+:<<
+  [ 2 * ] swap repeat
 ;

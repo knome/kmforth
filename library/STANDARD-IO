@@ -134,7 +134,7 @@
     pop      # [: err
     dup      # [: err err (so we return 'err' on $.leaveIf)
   ]
-  $.callIf                 # [: amount 0 | err err
+  $.callIf                 # [: amount err=0 | err err
   $.leaveIf                # [: amount | err (leave)
   
   $thus.get +              # [: (amount+thus)
@@ -174,4 +174,29 @@
 # 
 :exit
   syscall/exit
+;
+
+# this should be replaced when we are able to do strings properly in the gc
+# 
+# [: integer buffer
+# [: 
+# 
+:integerToString
+  { $buffer }
+  $value.set
+  $buffer.set
+  
+  # if the value is zero, just leave off early
+  # 
+  $value.get not
+  [
+    $buffer.get 1 + 0 memory/poke-b
+    $buffer.get 0 memory/poke-b
+  ]
+  $.callIf
+  $value.get not $.leaveIf
+  
+  # otherwise we'll iteratively mod it and extend the string till we're done
+  # 
+  
 ;

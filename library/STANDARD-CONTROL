@@ -8,7 +8,8 @@
   $.jump
 ;
 
-# (todo cond)
+# [: todo cond
+# 
 :while { $test $todo $retry $condRet }
   $test.set    # pop stack into test local
   $todo.set    # pop stack into todo local
@@ -55,7 +56,7 @@
 
 # [: cond onIf onElse
 # [: 
-:if { $onElse }
+:if { $cond $onIf $onElse }
   
   # clear the stack of cond and branches
   # 
@@ -69,5 +70,5 @@
   
   # otherwise call the default else branch
   # 
-  $onElse call
+  $onElse.get call
 ;

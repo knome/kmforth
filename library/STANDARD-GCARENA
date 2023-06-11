@@ -1,15 +1,11 @@
 
 # region format
 # 
-# [ header ] 
-# [ roots , ... ]
-# [ ... , data  ]
-# 
-# [ givenSize  qword ] # what size the user requested
-# [ actualSize qword ] # what size of the user request we could actually use ( clipped to nearest page )
-# [ totalPages qword ] # how many pages does the memory arena have to play with?
-# [ nRoots     qword ] # how many roots were requested for the arena?
-# [ nObjects   qword ] # how many objects are currently in the arena?
+# [ header  ] 
+# [ roots   ]
+# [ entries ]
+# ... gap ...
+# [ data    ]
 
 # a gcref has two parts
 #   64bits
@@ -17,26 +13,35 @@
 #     45bits : arena-pointer
 #   in this way, we can save and move references to arena data easily in kmforth's stack values
 #   right now, we'll need to manually clear gc roots to release data
-#   we could alter things to do stack scans in the future to be able to automatically collect lost roots as well
+#   we could alter things to do stack scans in the future to be able to automatically collect
+#     lost roots as well
 #   but not in the first version
 
 % gc/-header (@rc @st)
   @ @rc @st (
-    (givenSize     type/u64)
-    (actualSize    type/u64)
-    (totalPages    type/u64)
-    (sizeInSlots   type/u64)
-    (nRoots        type/u32)
-    (nObjects      type/u32)
-    (nextFreeIndex type/u32)
+    (givenSize        type/u64) # space user specified as maximum size
+    (actualSize       type/u64) # actual space used ( multiple of pages )
+    (totalPages       type/u64) # number of pages used by the arena
+    (rootsStart       type/u64) # pointer to where roots section begins
+    (nRoots           type/u64) # how many roots are there?
+    (entriesStart     type/u64) # pointer to where entries section begins
+    (nextEntryIndex   type/u64) # index where the next entry should go
+    (nextDataEndIndex type/u64) # pointer to where next data segment should end
+    (lastDataEndIndex type/u64) # index of just after the last available chunk
   );
 ;
 
 % gc/-entry (@rc @st)
   @ @rc @st (
-    (typeIndex     type/u32)
-    (sizeInEntries type/u32)
-    (data          type/u64)
+    (type         type/u32) # where the type-struct can be found for this type
+    (sizeInChunks type/u32) # how large the allocation is
+    (data         type/u64) # either: the data ( if size <= u64 ) or a location object
+  );
+;
+
+% gc/-chunk (@rc @st)
+  @ @rc @st (
+    (chunks type/u64)
   );
 ;
 
@@ -47,88 +52,271 @@
   );
 ;
 
+% gc/-root (@rc @st)
+  @ @rc @st (
+    (index type/u32)
+  );
+;
+
 @ struct/define gc/-header   ;
 @ struct/define gc/-entry    ;
+@ struct/define gc/-chunk    ;
 @ struct/define gc/-location ;
+@ struct/define gc/-root     ;
 
 :gc/-pagesize 4096 ;
 
-# [: size
+:gc/-3pages "arenas must be at least three pages of memory" ;
+
+# [: size roots
 # [: arena
 # 
-:gc/arena { $size $actual $totalPages }
+:gc/arena
+  {
+    $size $roots
+    
+    $actualSize
+    $totalPages
+    $buffer
+    $rootsStart
+    $entriesStart
+    $nextEntry
+    $nextDataEndIndex
+    $totalAvailableChunks
+  }
   
-  dup $size.set                                                   # [: size
+  $roots.set                                     # [: size
+  $size.set                                      # [:
   
-  gc/-pagesize 3 * <                                              # [: (size<pagesize*3)
-  dup                                                             # [: (size<pagesize*3) (size<pagesize*3)
-  [ 0 swap "arenas must be at least three pages of memory" swap ] # [: (size<pagesize*3) (size<pagesize*3) diefn
-  $.callIf                                                        # [: (size<pagesize*3) | 0 errmsg (size<pagesize*3) {oncalled}
-  $.leaveIf                                                       # [: | 0 errmsg {leaving}
+  $size.get gc/-pagesize 3 * <                   # [: (size<pagesize*3)
+  dup                                            # [: (size<pagesize*3) (size<pagesize*3)
+  [ 0 swap gc/-3pages swap ]                     # [: (size<pagesize*3) (size<pagesize*3) diefn
+  $.callIf                                       # [: (size<pagesize*3)
+  #                                              #    | 0 errmsg (size<pagesize*3) {oncalled}
+  $.leaveIf                                      # [: 
+  #                                              #    | 0 errmsg {leaving}
   
-  $size.get dup gc/-pagesize % - $actual.set                      # determine how much actual memory we'll be using
-  $actual.get gc/-pagesize / $totalPages.set                      # figure out how many pages that is
+  $size.get dup gc/-pagesize % - $actualSize.set # determine how much actual memory we'll be using
+  $actualSize.get gc/-pagesize / $totalPages.set # figure out how many pages that is
   
-  $actual.get memory/map-region                                   # [: buffer err
-  dup $.leaveIf                                                   # [: buffer err ( on error leaves with [: <trash> err
-  pop                                                             # [: buffer
+  $actualSize.get memory/map-region              # [: buffer err
+  dup                                            # [: buffer err err
+  $.leaveIf                                      # [: buffer err (on leave) | buffer err (on stay)
+  pop                                            # [: buffer
   
-  dup $size.get       gc/-header//givenSize.set                   # [: buffer
-  dup $actual.get     gc/-header//actualSize.set                  # [: buffer
-  dup $totalPages.get gc/-header//totalPages.set                  # [: buffer
-  dup 0               gc/-header//nRoots.set                      # [: buffer
-  dup 0               gc/-header//nObjects.set                    # [: buffer
+  $buffer.set                                    # [: 
   
-  0                                                               # [: buffer err=0
+  # initialize the header structure
+  
+  $buffer.get $size.get gc/-header//givenSize.set
+  $buffer.get $actualSize.get gc/-header//actualSize.set
+  $buffer.get $totalPages.get gc/-header//totalPages.set
+  
+  $buffer.get gc/-header.size + $rootsStart.set
+  
+  $buffer.get $rootsStart.get gc/-header//rootsStart.set
+  $buffer.get $roots.get gc/-header//nRoots.set
+  
+  $rootsStart.get type/u32.size $roots.get * + $entriesStart.set
+  $buffer.get $entriesStart.get gc/-header//entriesStart.set
+  
+  $buffer.get 0 gc/-header//nextEntryIndex.set
+  
+  $buffer.get $actualSize.get +   # [: endOfArena
+  $entriesStart.get -             # [: size of entries/data area
+  gc/-chunk.size /                # [: size of entries/data area in chunks
+  $totalAvailableChunks.set
+  
+  $buffer.get $totalAvailableChunks.get gc/-header//lastDataEndIndex.set
+  $buffer.get $totalAvailableChunks.get gc/-header//nextDataEndIndex.set
+  
+  $buffer.get 0                                                   # [: buffer err=0
 ;
 
 # [: arena rootId size
-# [: gcref
+# [: gcref err
 # 
-:gc/alloc { $size $entriesNeeded }
+:gc/allocate
+  {
+    $arena $rootId  $size
+    $chunksNeededForData $chunksNeededForEntry $totalChunksNeeded
+    $chunksRemaining $nextEntryIndex $nextEntry $data
+    $location
+  }
   
-  $size.set # [: arena rootId
+  $size.set    # [: arena rootId
+  $rootId.set  # [: arena
+  $arena.set   # [: 
   
   # 
   # determine the space required for an allocation
   # 
   
-  $size.get gc/-entry.size <=
-  [ 
-    # if the size is less than or equal to the data lump size, we don't need any entries
-    # 
-    1 
-  ]
-  [
-    # otherwise, we will need 1 + enough to cover the size of the object being stored
-    # 
-    1                                    # the object entry itself
-    $size.get gc/-entry.size / +         # how many full entries will the size need?
-    $size.get gc/-entry.size % not not + # 1 if we have a partial page, else 0
-  ]
-  if
-  
-  # [: arena rootId
+  $size.get                     # [: size
+  gc/-calculate-chunks-for-size # [: needed
+  dup $chunksNeededForData.set  # [: chunks-needed-for-data
+  gc/-chunks-required-for-entry # [: chunks-needed-for-data total-chunks-needed
+  dup $chunksNeededForEntry.set # [: chunks-needed-for-data total-chunks-needed
+  +                             # [: total-chunks-needed
+  $totalChunksNeeded.set
   
   # 
-  # determine if there is sufficient space in the arena for the allocation
+  # determine how much space is available in the arena
   # 
   
+  $arena.get gc/-header//nextDataEndIndex.get                               # [: nextdataend
+  $arena.get gc/-header//nextEntryIndex.get gc/-chunks-required-for-entry * # [: nextdataend lastentrychunk=(lastentry*chunks)
+  -                                                                         # [: remainingChunks=(nextdataend-lastentrychunk)
+  $chunksRemaining.set                                                      # [:
+  
   # 
-  # if there is not, collect the arena in an attempt to free up sufficient space
+  # if there is not enough space, collect the arena in an attempt to free up sufficient space
   # 
+  
+  $chunksRemaining.get $totalChunksNeeded.get <
+  [ "insufficient space for allocation, implement collection!" panic ]
+  $.callIf
   
   # 
   # allocate the value
   # 
   
+  # grab the location of the next entry and bump the nextentry slot for the next allocation
+  # 
+  $arena.get gc/-arena/take-entry-index # [: next-entry-index
+  
+  $arena.get swap gc/-arena/entry-index-to-entry # [: next-entry
+  
+  $nextEntry.set                        # [: 
+  
+  $arena.get $chunksNeededForData.get gc/-arena/take-data
+  $data.set
+  
+  # we set no type on fresh type-indexes
+  # if they want cleanup, etc, they'll need to set the type themselves
+  # 
+  $nextEntry.get 0 gc/-entry//type.set
+  $nextEntry.get $chunksNeededForData.get gc/-entry//sizeInChunks.set
+  
+  $nextEntry.get gc/-entry//data.addr
+  $location.set
+  
+  $location.get $data.get gc/-location//dataIndex.set
+  $location.get $chunksNeededForData.get gc/-location//dataSize.set
+  
   # 
   # write the value into the appropriate root
   # 
+  
+  $arena.get gc/-header//rootsStart.get gc/-root.size $rootId.get * + # [: &roots[rootId]
+  $nextEntry.get swap gc/-root//index.set                             # [: 
   
   # 
   # return a gcref for the given root
   # 
   
+  $arena.get $rootId.get gc/-compress-to-gcref
   
+  # 
+  # indicate no error
+  # 
+  
+  0
+;
+
+:gc/-chunks-required-for-entry
+  gc/-entry.size gc/-calculate-chunks-for-size
+;
+
+# [: size
+# [: entries-required-to-encompass-size
+# 
+:gc/-calculate-chunks-for-size { $size }
+  $size.set
+  $size.get gc/-chunk.size /
+  $size.get gc/-chunk.size % not not +
+;
+
+# take the current next-entry and set header nextentryindex to point at the next one
+# 
+# [: arena
+# [: nextEntry
+# 
+:gc/-arena/take-entry-index
+  { $arena }
+  $arena.set
+  $arena.get gc/-header//nextEntryIndex.get  # [: next-entry-index
+  $arena.get gc/-header//nextEntryIndex.incr # [: next-entry-index
+;
+
+# reserve a data segment by updating the data end and returning it as the start
+# for the current data
+# 
+# [: arena chunksNeeded
+# [: data-index
+# 
+:gc/-arena/take-data
+  { $arena $chunksNeeded $new }
+  
+  $chunksNeeded.set
+  $arena.set
+  
+  $arena.get gc/-header//nextDataEndIndex.get # [: endIndex
+  $chunksNeeded.get -                         # [: (endIndex-chunksNeeded)
+  $new.set
+  
+  $arena.get $new.get gc/-header//nextDataEndIndex.set
+  
+  $new.get
+;
+
+# [: arena entry-index
+# [: entry
+# 
+:gc/-arena/entry-index-to-entry
+  {
+    $arena $entryIndex
+    $entriesStart $chunksPerEntry
+  }
+  
+  $entryIndex.set
+  $arena.set
+  
+  $arena.get gc/-header//entriesStart.get                   # [: entriesStart
+  $entriesStart.set                                         # [: 
+  
+  gc/-entry.size gc/-calculate-chunks-for-size              # [: entriesStart chunksPerEntry
+  $chunksPerEntry.set                                       # [: 
+  
+  $entriesStart.get $entryIndex.get $chunksPerEntry.get * + # [: pointerToEntry
+;
+
+# [: arena rootId
+# [: gcref
+# 
+:gc/-compress-to-gcref
+  {
+    $arena $rootId
+  }
+  
+  $rootId.set
+  $arena.set
+  
+  # rootId can't be more than 2**16 (due to our compaction method here)
+  $rootId.get 65536 < not
+  [ "root ids must be less than 65536 due to pointer tagging used for gcrefs" ]
+  $.callIf
+  
+  $rootId.get 48 <<
+  $arena.get or
+;
+
+# [: gcref
+# [: arena rootId
+# 
+:gc/-decompress-gcref
+  dup                    # [: gcref gcref
+  0x0000FFFFFFFFFFFF and # [: gcref arena
+  swap                   # [: arena gcref
+  0xFFFF000000000000 and # [: arena rootId
 ;

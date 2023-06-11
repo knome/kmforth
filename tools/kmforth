@@ -480,7 +480,7 @@ def extract_number( initial, characters ):
         if not pc:
             break
         cc = pc.character()
-        if cc in '0123456789.xoabcdef':
+        if cc.lower() in '0123456789.xoabcdef':
             bits.append( cc )
             characters.take()
             continue
@@ -680,25 +680,26 @@ def parse_named_function(
             )
         )
     
-    bodyBits = capture_balanced_bits_til_terminator( tokens )
-    
-    end = tokens.take()
-    if end == None:
-        raise Exception( 'expected ";" after %s' % repr( initial ) )
-    elif end.kind() != ';':
-        raise Exception(
-            'expected ";" after %s, found %s' % ( repr( initial ), repr( end ) )
+    with print_on_exception( "WHILE PROCESSING FUNCTION: %s" % repr( name ) ):
+        bodyBits = capture_balanced_bits_til_terminator( tokens )
+        
+        end = tokens.take()
+        if end == None:
+            raise Exception( 'expected ";" after %s' % repr( initial ) )
+        elif end.kind() != ';':
+            raise Exception(
+                'expected ";" after %s, found %s' % ( repr( initial ), repr( end ) )
+            )
+        
+        bodyBits.append( end )
+        
+        body = parse_body(
+            initial = initial,
+            tokens  = Source( expand_bitstream(
+                macroContext = macroContext       ,
+                tokens       = Source( bodyBits ) ,
+            )),
         )
-    
-    bodyBits.append( end )
-    
-    body = parse_body(
-        initial = initial,
-        tokens  = Source( expand_bitstream(
-            macroContext = macroContext       ,
-            tokens       = Source( bodyBits ) ,
-        )),
-    )
     
     return NamedFunction(
         location = initial.location() ,
@@ -2668,9 +2669,6 @@ def generate_code(
                 
             elif command.kind() == 'string':
                 
-                if "'" in command.value():
-                    raise Exception( 'need a more robust implementation' )
-                
                 sn = stringCoalescer.lookup( command.value() )
                 if not sn:
                     sn = "km_c_" + str(nns)
@@ -2685,8 +2683,17 @@ def generate_code(
                 code.append( '   add r14, 8\n' )
                 
             elif command.kind() == 'integer':
-                code.append( '   mov qword [r14], %s\n' % command.value() )
-                code.append( '   add r14, 8\n' )
+                # 
+                # you can't write an immediate larger than a 32bit value directly to memory
+                # you have to load the value into a register and use the register command form
+                # 
+                if command.value() > (4294967296 - 1):
+                    code.append( '   mov rax, %s\n' % command.value() )
+                    code.append( '   mov [r14],rax\n' )
+                    code.append( '   add r14,8\n' )
+                else:
+                    code.append( '   mov qword [r14], %s\n' % command.value() )
+                    code.append( '   add r14, 8\n' )
             
             elif command.kind() == 'localfn':
                 if command.value().startswith('$.'):
@@ -2747,10 +2754,18 @@ def generate_code(
                         raise Exception( 'unknown builtin localfn: %s' % repr( command.value() ) )
                 else:
                     # locals getters and setters
-                    localName, memberfn = command.value().split('.',1)
+                    commandBits = command.value().split('.',1)
+                    if len( commandBits ) != 2:
+                        raise Exception( 'command-bits length not 2? %s' % repr( commandBits ) )
+                    localName, memberfn = commandBits
                     slotno = functions[ fn ].body().get_localfn_slotno( localName )
                     if slotno == None:
-                        raise Exception( 'failed to find local %s in function %s' % ( repr( localName ), repr( fn ) ) )
+                        raise Exception(
+                            'failed to find local %s in function %s' % (
+                                repr( localName ) ,
+                                repr( fn )        ,
+                            )
+                        )
                     if memberfn == 'get':
                         code.append( '    ; push local (%s) to datastack\n' % repr( localName ) )
                         code.append( '    mov rax, [r15-8*%d]\n' % (slotno+1) )
@@ -2768,7 +2783,6 @@ def generate_code(
                         code.append( '    mov qword [r15-8*%d], %s\n' % ( (slotno+1), label) )
                         code.append( '    %s:\n' % label )
                     elif memberfn == 'addr':
-                        # maybe replace this with &$local later?
                         code.append( '    ; push address of local (%s) onto stack\n' % repr( localName ) )
                         code.append( '    lea  rax,[r15-8*%d]\n' % (slotno+1) )
                         code.append( '    mov  [r14],rax\n' )

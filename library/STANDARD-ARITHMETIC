@@ -167,8 +167,16 @@
 
 # left-shift
 # 
-# [: value shift-amount
+# [: value shiftAmount
 # 
 :<<
   [ 2 * ] swap repeat
+;
+
+# right-shift
+# 
+# [: value shiftAmount
+# 
+:>>
+  [ 2 / ] swap repeat
 ;

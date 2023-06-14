@@ -1,0 +1,30 @@
+
+## # [: arena rootId
+## # [: gcref
+## # 
+## :gc/-compress-to-gcref
+##   {
+##     $arena $rootId
+##   }
+##   
+##   $rootId.set
+##   $arena.set
+##   
+##   # rootId can't be more than 2**16 (due to our compaction method here)
+##   $rootId.get 65536 < not
+##   [ "root ids must be less than 65536 due to pointer tagging used for gcrefs" ]
+##   $.callIf
+##   
+##   $rootId.get 48 <<
+##   $arena.get or
+## ;
+## 
+## # [: gcref
+## # [: arena rootId
+## # 
+## :gc/-decompress-gcref
+##   dup                    # [: gcref gcref
+##   0x0000FFFFFFFFFFFF and # [: gcref arena
+##   swap                   # [: arena gcref
+##   0xFFFF000000000000 and # [: arena rootId
+## ;

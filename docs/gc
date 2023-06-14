@@ -1,0 +1,62 @@
+
+qualities the gc objects can have that I need to account for:
+* references : calls a given function for each non-0 reference in the data structure, for both tracing and updating references
+* destruct   : called to release resources once the object is no longer in use
+* copy       : called if needed to move non-blit custom copying function
+
+# gcarena format
+# 
+# [ ........................ arena ..................... ]
+# [ ..... pages ... ][ .............. pages ............ ]
+# [ header ][ roots ][ meta + entries ] ...gap... [ data ]
+# 
+# the gap must maintain sufficient space for collection structures
+# to be expressed within it
+# 
+# I want a fast lookup for items that need destructors called
+# so that I don't have to scan over all of the dead objects
+# and can instead just jump to the ones that are being a pain.
+# 
+# [ ..... X entries ..... ]
+# [ 
+
+to speed collection, we'll cache whether the above functions are present in
+bitmaps that are inlined into the entries. it takes 32 128 byte entries to
+fill a pc page.
+
+one reserved page can keep track of 32,768 bits. if we divide the page
+into 4 that's 8196 bits we can track for upcoming items. to make things
+nice, we'll have each encompass itself, so that we'll have a simple
+bit of bit manipulation to find the bits associated with a given object.
+
+we can handle 256 pages of entries this way ( leaving entries that would
+land on the reserved page itself unused ). lets us potentially skip the
+vast majority of pages for programs that generate lots of garbage, being
+able to tell from that initial page whether any of the next 255 have
+anything that needs to be destructed or not
+
+hmm, we don't really need to cache custom copying. caching whether an
+entry has a references function might be good however, that way we can
+skip scanning anything that doesn't ( avoiding calls for integers, strings,
+binary blobs and other common datatypes ).
+
+if we track only destructors and references in the reserved page, we can
+double the number of items the reserved page tracks, giving us a full
+16k items across 512 pages, allowing us potentially massive speedups.
+
+----
+
+since the reservation falls under itself, we can use those bits that would
+have represented the entries that would have laid where the reservation is
+in order to track wads of bits later in it, so we can avoid looking at
+even the entire page.
+
+there would only be 32 bits per attribute available.
+
+that would let us mark whether each run of 128 pages had any bits set
+so we could avoid those pages. I think the logic for doing this would
+probably be more complex and time consuming than just running over the
+bits.
+
+we'll leave these two u32s unused for now. an acceptable amount of
+waste for what will constitute a potentially massive speed up overall.

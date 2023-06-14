@@ -98,3 +98,44 @@
   pop pop pop pop
   
 ;
+
+# [: &bitmap bitIndex
+# [: 
+# 
+: memory/bitmap.setNth
+    { $which $whichByte $mask }
+    
+    $which.set         # [: &bitmap
+    $which.get 8 /     # [: &bitmap whichByte
+    +                  # [: &whichByte
+    $whichByte.set     # [: 
+    
+    $which.get 8 %     # [: whichBit
+    0b10000000 swap >> # [: mask=(0b10000000>>whichBit)
+    $mask.set          # [: 
+    
+    $whichByte.get memory/peek-b # [: currentByte
+    $mask.get                    # [: currentByte mask
+    or                           # [: newByte=(currentByte|mask)
+    $whichByte.get swap          # [: &byte newByte
+    memory/poke-b                # [: 
+;
+
+# [: &bitmap bitIndex
+# 
+: memory/bitmap.getNth
+  { $which $whichByte $mask }
+  
+  $which.set         # [: &bitmap
+  $which.get 8 /     # [: &bitmap whichByte
+  +                  # [: &whichByte
+  $whichByte.set     # [:
+  
+  $which.get 8 %     # [: whichBit
+  0b10000000 swap >> # [: mask=(0b10000000>>whichBit)
+  $mask.set          # [: 
+  
+  $whichByte.get memory/peek-b # [: currentByte
+  $mask.get                    # [: currentByte mask
+  and                          # [: ifSet=(currentByte&mask)
+;

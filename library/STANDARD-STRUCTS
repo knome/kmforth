@@ -51,7 +51,7 @@
 
 % struct/-define (@name @fields)
   @ struct/-with-mapping-window struct/-define-field-accessors @name @fields ;
-  : @name.size 0 @( (@fields) (@f.each) @( (@f) ((@fn @ft)) @ft.size + ) ) + ;
+  : @name.size 0 @( (@fields) (@f.each) @( (@f) ((@fn @ft)) @ft.size + ) ) ;
 ;
 
 % struct/-define-field-accessors ( @name @before (@fieldName @fieldType) @after )

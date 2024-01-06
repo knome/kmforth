@@ -85,13 +85,13 @@
   # for now, just panic. if we should ever add compile-time code/warnings/errors
   # then it will be more appropriate to handle this sort of thing at that time.
   # 
-  gc/-pagesize gc/-entry.size % not
+  gc/-pagesize gc/-entry.size %
   [ "IMPLEMENTATION ERROR: (PAGESIZE%GCENTRY.SIZE) IS NOT ZERO" panic ]
   $.callIf
   
   # same with chunk sizes
   # 
-  gc/-pagesize gc/-chunk.size % not
+  gc/-pagesize gc/-chunk.size %
   [ "IMPLEMENTATION ERROR: (PAGESIZE%GCCHUNK.SIZE) IS NOT ZERO" panic ]
   $.callIf
   
@@ -161,7 +161,9 @@
   # we now need to initialize the header, the roots, and the metadata chunk
   # 
   $buffer.get $size.get gc/-header//givenSizeInBytes.set
+  
   $buffer.get $totalPages.get gc/-pagesize * gc/-header//actualSizeInBytes.set
+  
   $buffer.get $totalPages.get gc/-header//sizeInPages.set
   
   $buffer.get $pointerToRootsStart.get gc/-header//pointerToRootsStart.set
@@ -185,4 +187,144 @@
   # everything should be ready to go with no error
   # 
   $buffer.get 0
+;
+
+# [: arena rootId size
+# [: gcref err
+# 
+:gc/allocate
+  {
+    $arena $rootId $size
+    
+    $chunksRequiredForAllocation
+    $totalChunksRequired
+    $availableChunks
+    
+    $entryChunkIndex
+    $dataChunkIndex
+    
+    $entry
+    $location
+    $entryIndex
+    
+    $lacksEnoughChunks
+    
+    $root
+  }
+  
+  # save of parameters
+  # 
+  $size.set
+  $rootId.set
+  $arena.set
+  
+  # determine how many data chunks the given size of data will require
+  # 
+  $size.get gc/-chunks-required
+  $chunksRequiredForAllocation.set
+  
+  # determine the full number of data chunks including the entry
+  # 
+  # TODO: this needs to check if the next entry would be in a meta-data
+  # page, and if so, it needs to allocate sufficient space for that
+  # metadata page in addition to the entry itself.
+  # 
+  gc/-entry.size gc/-chunks-required $chunksRequiredForAllocation.get +
+  $totalChunksRequired.set
+  
+  # determine how many data chunks are available to be allocated
+  # 
+  $arena.get gc/-header//indexOfChunkEndingNextData.get
+  $arena.get gc/-header//indexOfChunkForNextEntry.get
+  -
+  $availableChunks.set
+  
+  # determine if there are insufficient chunks available.
+  # 
+  $availableChunks.get $totalChunksRequired.get <
+  $lacksEnoughChunks.set
+  
+  # panic if not. later we'll do a collection and check again
+  # 
+  $lacksEnoughChunks.get
+  [ "GC COLLECTION NOT YET IMPLEMENTED" panic ]
+  $.callIf
+  
+  # there is enough space
+  # allocate the entry at the start and the data at the end
+  # (
+  #   we'll compress data of one chunk into the entry at a
+  #   later time, for now we'll do far end only
+  # )
+  
+  # grab the chunk index where our entry will be
+  # 
+  $arena.get gc/-header//indexOfChunkForNextEntry.get
+  $entryChunkIndex.set
+  
+  # bump the next-entry field to after the one we're taking
+  # 
+  $arena.get $entryChunkIndex.get gc/-entry.size gc/-chunks-required + gc/-header//indexOfChunkForNextEntry.set
+  
+  # now determine where the data will go
+  # ( this will be the same as the next-data-end, so we'll set both from it
+  # 
+  $arena.get gc/-header//indexOfChunkEndingNextData.get $chunksRequiredForAllocation.get +
+  $dataChunkIndex.set
+  $arena.get $dataChunkIndex.get gc/-header//indexOfChunkEndingNextData.set
+  
+  # now convert the data over to an address so we can initialize the entry itself
+  # 
+  $arena.get $entryChunkIndex.get gc/-chunk-to-address
+  $entry.set
+  
+  $entry.get 0 gc/-entry//type.set
+  
+  $entry.get gc/-entry//data.addr
+  $location.set
+  
+  $location.get $dataChunkIndex.get              gc/-location//dataIndex.set
+  $location.get $chunksRequiredForAllocation.get gc/-location//dataSize.set
+  
+  # now set the given root to hold the index of the entry
+  # 
+  $entryChunkIndex.get gc/-entry.size gc/-chunk.size / /
+  $entryIndex.set
+  
+  # find the root via the rootId
+  # 
+  $arena.get gc/-header//pointerToRootsStart.get
+  gc/-root.size $rootId.get *
+  +
+  $root.set
+  
+  # set the root to the entry index
+  # 
+  $root.get $entryIndex.get gc/-root//index.set
+  
+  # for now, return rootId instead of the gcref
+  # 
+  $rootId.get 0
+;
+
+: gc/-chunks-required
+  { $size }
+  $size.set
+  
+  $size.get gc/-chunk.size /
+  $size.get gc/-chunk.size % not not +
+;
+
+# [: arena chunk
+# [: &chunk
+# 
+: gc/-chunk-to-address
+  { $arena $chunkIndex }
+  
+  $chunkIndex.set
+  $arena.set
+  
+  $arena.get gc/-header//pointerToEntriesStart.get
+  $chunkIndex.get gc/-chunk.size *
+  +
 ;

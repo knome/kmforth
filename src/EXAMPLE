@@ -2,18 +2,21 @@
 @ "STANDARD" ;
 
 :main
-  { $test  $arena }
-  200000                                # [: size
+  {
+    $test
+    $arena
+  }
+  
+  20000                                 # [: size
   10                                    # [: size roots
   gc/arena                              # [: arena-addr err
   "failed to allocate arena" dieOnError # [: arena-addr
   $arena.set
   
-  # $arena.get 1 200000 gc/allocate "failed to allocate value" dieOnError
-  # 
-  # "should have died and didnt" panic
-  # 
-  # gc/-decompress-gcref
+  # $arena.get 1 30 gc/allocate "failed to allocate value" dieOnError
   
-  0 exit
+  $arena.get
+  [ "aaa" log dup 1 30 gc/allocate "failed to allocate value" dieOnError pop ]
+  loop
+  
 ;

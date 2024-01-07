@@ -1785,25 +1785,56 @@ class ExpansionRuleIfLessThan:
             if value.kind() != 'macrolist':
                 raise Exception( '.ifLessThan expected a macrolist, found %s' % repr( value ) )
             
-            # if I have a macrolist, I need to get its variations via its expander parameter
-            # what a complete pain in the arse
-            
-            last       = None
-            isLessThan = 1
+            last = None
+            isLesser = True
             for bit in value.bits():
                 if bit.kind() != 'integer':
                     raise Exception( '.ifLessThan expected macrolist to contain integers, found %s' % repr( bit ) )
-                
-                if last == None:
+                elif last == None:
                     last = bit
                 else:
                     if not ( last.value() < bit.value() ):
-                        isLessThan = 0
+                        isLesser = False
+                        break
             
-            if isLessThan:
+            if isLesser:
                 yield value
 
-class ExpansionRuleIfGreaterThan: pass
+class ExpansionRuleIfGreaterThan:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self     ,
+        location ,
+        source   ,
+    ):
+        self._location = location
+        self._source   = source
+        
+    def variations(
+        self ,
+    ):
+        for value in self._source.variations():
+            
+            if value.kind() != 'macrolist':
+                raise Exception( '.ifGreaterThan expected a macrolist, found %s' % repr( value ) )
+            
+            last = None
+            isGreater = True
+            for bit in value.bits():
+                if bit.kind() != 'integer':
+                    raise Exception( '.ifGreaterThan expected macrolist to contain integers, found %s' % repr( bit ) )
+                elif last == None:
+                    last = bit
+                else:
+                    if not ( last.value() > bit.value() ):
+                        isGreater = False
+                        break
+            
+            if isGreater:
+                yield value
 
 # due to the way expansion currently operates, this doesn't do anything at all
 # it either spits out a single 0 which is used and reused by the following parameter expansions

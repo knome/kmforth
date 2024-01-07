@@ -10,6 +10,7 @@ import os
 import optparse
 import contextlib
 import re
+import binascii
 
 G_SHOW_EXPANSIONS = False
 
@@ -842,6 +843,20 @@ def mangle( name ):
     
     return final
 
+def unmangle( name ):
+    bits = []
+    ss   = Source( name[len('kmfb_'):] )
+    
+    while ss.peek() != None:
+        vv = ss.take()
+        if vv == '_':
+            bits.append( ss.take() + ss.take() )
+            ss.take()
+        else:
+            bits.append( ''.join( hex(cc)[2:] for cc in vv.encode( 'utf-8' ) ) )
+    
+    return binascii.a2b_hex( ''.join(bits) ).decode( 'utf-8' )
+
 class NamedFunction:
     def __init__(
         self     ,
@@ -1255,7 +1270,7 @@ def parse_macro_parameter(
             )
         
         raise Exception( 'there it is' )
-            
+    
     tokens.take()
     
     bits = name.value().split(".")
@@ -1269,29 +1284,28 @@ def parse_macro_parameter(
     )
     
     expansionRules = {
-        'each'        : ExpansionRuleEach        ,
-        'count'       : ExpansionRuleCount       ,
-        'first'       : ExpansionRuleFirst       ,
-        'rest'        : ExpansionRuleRest        ,
-        'toZero'      : ExpansionRuleToZero      ,
-        'toOne'       : ExpansionRuleToOne       ,
-        'decr'        : ExpansionRuleDecr        ,
-        'incr'        : ExpansionRuleIncr        ,
-        'expandIf'    : ExpansionRuleExpandIf    ,
-        'expandIfNot' : ExpansionRuleExpandIfNot ,
-        'ifNotEmpty'  : ExpansionRuleIfNotEmpty  ,
-        'equal'       : ExpansionRuleEqual       ,
-        'lessThan'    : ExpansionRuleLessThan    ,
-        'greaterThan' : ExpansionRuleGreaterThan ,
-        'ignore'      : ExpansionRuleIgnore      ,
+        'each'          : ExpansionRuleEach          ,
+        'count'         : ExpansionRuleCount         ,
+        'first'         : ExpansionRuleFirst         ,
+        'rest'          : ExpansionRuleRest          ,
+        'toZero'        : ExpansionRuleToZero        ,
+        'toOne'         : ExpansionRuleToOne         ,
+        'decr'          : ExpansionRuleDecr          ,
+        'incr'          : ExpansionRuleIncr          ,
+        'expandIf'      : ExpansionRuleExpandIf      ,
+        'expandIfNot'   : ExpansionRuleExpandIfNot   ,
+        'ifNotEmpty'    : ExpansionRuleIfNotEmpty    ,
+        'equal'         : ExpansionRuleEqual         ,
+        'ifLessThan'    : ExpansionRuleIfLessThan    ,
+        'ifGreaterThan' : ExpansionRuleIfGreaterThan ,
         
-        'expandno'    : ExpansionRuleExpandNo    ,
-        'globalno'    : ExpansionRuleGlobalNo    ,
+        'expandno'      : ExpansionRuleExpandNo      ,
+        'globalno'      : ExpansionRuleGlobalNo      ,
     }
     
     for bit in bits[1:]:
         if bit in expansionRules:
-            expander.add_expansion_rule( expansionRules[ bit ] )
+            expander.add_expansion_rule( expansionRules[ bit ], location = name.location() )
         else:
             raise Exception( 'unknown expansion rule: %s' % repr( bit ) )
     
@@ -1347,24 +1361,43 @@ class ExpanderScalar:
         return
     
     def expansion_rules( self ):
-        return self._expansionRules
+        for rule, location in self._expansionRules:
+            yield rule
     
-    def add_expansion_rule( self, rule ):
-        return self._expansionRules.append( rule )
+    def add_expansion_rule( self, rule, location ):
+        return self._expansionRules.append( (rule, location) )
     
     def consumes_argument( self ):
         if not self._expansionRules:
             return True
         else:
-            return self._expansionRules[0].consumes_argument()
+            return self._expansionRules[0][0].consumes_argument()
     
-    def variations( self, value ):
+    def argument_consuming_variations( self, value ):
         source = Variations( value )
-        for rule in self._expansionRules:
-            source = rule( source )
+        for rule, location in self._expansionRules:
+            source = rule(
+                location = location ,
+                source   = source   ,
+            )
         
         for variation in source.variations():
             yield variation
+    
+    def non_argument_consuming_variations( self ):
+        if self.consumes_argument():
+            raise Exception( 'nonconsuming variations should not be called for an argument consuming parameter' )
+        else:
+            rule, location = self._expansionRules[0]
+            source = rule( location = location )
+            for rule in self._expansionRules[1:]:
+                source = rule(
+                    location = location ,
+                    source   = source   ,
+                )
+            
+            for variation in source.variations():
+                yield variation
 
 class NamerScalar:
     def __init__(
@@ -1387,7 +1420,7 @@ class ExpanderMacroList:
     def consumes_argument( self ):
         return True
     
-    def variations( self, value ):
+    def argument_consuming_variations( self, value ):
         
         if value.kind() != 'macrolist':
             raise Exception( 'cannot deconstruct a non-macrolist: %s' % repr( value ) )
@@ -1407,7 +1440,20 @@ class ExpanderMacroList:
                 repr( value )              ,
             ))
         
-        root  = self._parameterList[ 0 ].expander().variations( bits[0] )
+        mapping = []
+        index   = 0
+        for parameter in self._parameterList:
+            if parameter.consumes_argument():
+                mapping.append(
+                    (lambda which: lambda: parameter.expander().argument_consuming_variations( bits[which] ))( index )
+                )
+                index += 1
+            else:
+                mapping.append(
+                    lambda: parameter.expander().non_argument_consuming_variations()
+                )
+        
+        root  = mapping[0]()
         first = next( root, None )
         if first == None:
             return
@@ -1420,7 +1466,7 @@ class ExpanderMacroList:
             # 
             while len( walk ) < len( bits ):
                 ii = len( walk )
-                ss = self._parameterList[ ii ].expander().variations( bits[ii] )
+                ss = mapping[ii]()
                 vv = next( ss, None )
                 if vv == None:
                     break
@@ -1483,10 +1529,12 @@ class ExpansionRuleEach:
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
+        self._location = location
+        self._source   = source
         
     def variations( self ):
         for value in self._source.variations():
@@ -1505,11 +1553,13 @@ class ExpansionRuleFirst:
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
-        
+        self._location = location
+        self._source   = source
+    
     def variations(
         self ,
     ):
@@ -1528,11 +1578,13 @@ class ExpansionRuleRest:
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
-        
+        self._location = location
+        self._source   = source
+    
     def variations(
         self ,
     ):
@@ -1554,10 +1606,12 @@ class ExpansionRuleToZero:
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
+        self._location = location
+        self._source   = source
         
     def variations( self ):
         
@@ -1583,10 +1637,12 @@ class ExpansionRuleToOne:
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
+        self._location = location
+        self._source   = source
     
     def variations( self ):
         for value in self._source.variations():
@@ -1609,11 +1665,13 @@ class ExpansionRuleDecr:
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
-        
+        self._location = location
+        self._source   = source
+    
     def variations( self ):
         for value in self._source.variations():
             if value.kind() != 'integer':
@@ -1632,10 +1690,12 @@ class ExpansionRuleIncr:
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
+        self._location = location
+        self._source   = source
     
     def variations( self ):
         for value in self._source.variations():
@@ -1649,7 +1709,34 @@ class ExpansionRuleIncr:
                     value    = new              ,
                 )
 
-class ExpansionRuleExpandIf: pass
+class ExpansionRuleExpandIf:
+    # truthiness: anything not 0 () or ""
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self     ,
+        location ,
+        source   ,
+    ):
+        self._location = location
+        self._source   = source
+        
+    def variations( self ):
+        for value in self._source.variations():
+            if value.kind() == 'integer':
+                if value.value():
+                    yield value
+            elif value.kind() == 'string':
+                if value.value():
+                    yield value
+            elif value.kind() == 'macrolist':
+                if value.bits():
+                    yield value
+            else:
+                raise Exception( '.expandIf expects integers, strings or macrolists, found %s' % repr( value ) )
+    
 class ExpansionRuleExpandIfNot: pass
     
 class ExpansionRuleIfNotEmpty:
@@ -1658,10 +1745,12 @@ class ExpansionRuleIfNotEmpty:
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
+        self._location = location
+        self._source   = source
         
     def variations(
         self ,
@@ -1675,16 +1764,18 @@ class ExpansionRuleIfNotEmpty:
 
 class ExpansionRuleEqual: pass
     
-class ExpansionRuleLessThan:
+class ExpansionRuleIfLessThan:
     @staticmethod
     def consumes_argument():
         return True
     
     def __init__(
-        self   ,
-        source ,
+        self     ,
+        location ,
+        source   ,
     ):
-        self._source = source
+        self._location = location
+        self._source   = source
     
     def variations(
         self ,
@@ -1692,7 +1783,7 @@ class ExpansionRuleLessThan:
         for value in self._source.variations():
             
             if value.kind() != 'macrolist':
-                raise Exception( '.lessThan expected a macrolist, found %s' % repr( value ) )
+                raise Exception( '.ifLessThan expected a macrolist, found %s' % repr( value ) )
             
             # if I have a macrolist, I need to get its variations via its expander parameter
             # what a complete pain in the arse
@@ -1700,54 +1791,70 @@ class ExpansionRuleLessThan:
             last       = None
             isLessThan = 1
             for bit in value.bits():
-                for token in bit.variations():
-                    
-                    if token.kind() != 'integer':
-                        raise Exception( '.lessThan expected macrolist to contain integers, found %s' % repr( bit ) )
-                    
-                    if last == None:
-                        last = token
-                    else:
-                        if not ( last.value() < token.value() ):
-                            isLessThan = 0
+                if bit.kind() != 'integer':
+                    raise Exception( '.ifLessThan expected macrolist to contain integers, found %s' % repr( bit ) )
+                
+                if last == None:
+                    last = bit
+                else:
+                    if not ( last.value() < bit.value() ):
+                        isLessThan = 0
             
-            yield Token(
-                location = value.location() ,
-                kind     = 'integer'        ,
-                value    = isLessThan       ,
-            )
+            if isLessThan:
+                yield value
 
-                                     
-class ExpansionRuleGreaterThan: pass
-class ExpansionRuleIgnore: pass
+class ExpansionRuleIfGreaterThan: pass
 
+# due to the way expansion currently operates, this doesn't do anything at all
+# it either spits out a single 0 which is used and reused by the following parameter expansions
+#   or it is instantiated anew for each combination of other parameter expansions.
+# to make it useful, it would need to be able to access data from the expansion process
+#   we'll need to introduce some way for it to communicate with the code performing the
+#   expansions at that location.
+# I don't care right now, so I'll just leave this reminder
 class ExpansionRuleExpandNo:
     @staticmethod
     def consumes_argument():
         return False
     
     def __init__(
-        self ,
+        self     ,
+        location ,
     ):
-        self._nn = 0
+        self._location = location
+        self._nn       = 0
     
     def variations( self ):
         nn = self._nn
         self._nn += 1
-        yield nn
+        
+        yield Token(
+            location = self._location ,
+            kind     = 'integer'      ,
+            value    = nn             ,
+        )
 
 class ExpansionRuleGlobalNo:
-    NN = 0
+    NN = [0]
     
     @staticmethod
     def consumes_argument():
         return False
     
-    @classmethod
-    def variations( klass ):
-        nn = klass.NN
-        klass.NN += 1
-        yield nn
+    def __init__(
+        self     ,
+        location ,
+    ):
+        self._location = location
+    
+    def variations( self ):
+        nn = self.NN[0]
+        self.NN[0] += 1
+        yield Token(
+            location = self._location ,
+            kind     = 'integer'      ,
+            value    = nn             ,
+        )
 
 def parse_unexpanded_definitions(
     tokens        ,
@@ -2212,19 +2319,9 @@ def determine_macro_expansions(
             )
         )
     
-    # once something refuses an argument, nothing may bind one
-    refusedArgument = False
     expansionArgSources = []
     for param in parameters:
-        
         if param.consumes_argument():
-            if refusedArgument:
-                raise Exception(
-                    'do not put macro parameters taht do not consume arguments before those that do: %s' % (
-                        repr( param ) ,
-                    )
-                )
-            
             arg = argSource.take()
             if arg == None:
                 raise Exception(
@@ -2234,29 +2331,15 @@ def determine_macro_expansions(
                     )
                 )
             else:
-                # for rule in param.expansion_rules():
-                #     arg = rule( arg )
-                    
                 expansionArgSources.append( NamedArgSource(
                     namer    = param.namer()    ,
                     expander = param.expander() ,
                     source   = arg              ,
                 ))
         else:
-            refusedArgument = True
-            
-            # arg   = None
-            # first = True
-            # for rule in param.expansion_rules():
-            #     if first:
-            #         arg   = rule()
-            #         first = False
-            #     else:
-            #         arg = rule( arg )
-            expansionArgSources.append( NamedArgSource(
+            expansionArgSources.append( NamedNonArgSource(
                 namer    = param.namer()    ,
                 expander = param.expander() ,
-                source   = arg              ,
             ))
     
     return chain_argument_sources( expansionArgSources )
@@ -2294,7 +2377,27 @@ class NamedArgSource:
     def variations(
         self ,
     ):
-        return self._expander.variations( self._source )
+        return self._expander.argument_consuming_variations( self._source )
+    
+class NamedNonArgSource:
+    def __init__(
+        self     ,
+        namer    ,
+        expander ,
+    ):
+        self._namer    = namer
+        self._expander = expander
+        return
+    
+    def namer(
+        self ,
+    ):
+        return self._namer
+    
+    def variations(
+        self ,
+    ):
+        return self._expander.non_argument_consuming_variations()
 
 def expand_bitstream(
     macroContext ,
@@ -2536,7 +2639,11 @@ def analyze_functions( allFns ):
         for cc in dd.body().commands():
             if cc.kind() == 'word':
                 if (cc.value()) not in allFns:
-                    raise Exception( 'unknown function called in %s: %s' % ( repr( dd ), repr( cc ) ) )
+                    raise Exception( 'unknown function called at %s in %s: %s' % (
+                        cc.location() ,
+                        repr( dd )    ,
+                        repr( unmangle( cc.value() ) ),
+                    ))
                 else:
                     callgraph[ fn ].add( cc.value() )
             elif cc.kind() == 'string':
@@ -2816,7 +2923,7 @@ def asm_stringize( ss ):
     bits      = []
     instr     = False
     for cc in ss:
-        if cc.lower() in ' abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()[]{}|,':
+        if cc.lower() in ' abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()[]{}|,:':
             if instr:
                 bits.append( cc )
                 continue

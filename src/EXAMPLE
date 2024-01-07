@@ -1,22 +1,33 @@
 
 @ "STANDARD" ;
 
-:main
-  {
-    $test
-    $arena
-  }
-  
-  20000                                 # [: size
-  10                                    # [: size roots
-  gc/arena                              # [: arena-addr err
-  "failed to allocate arena" dieOnError # [: arena-addr
-  $arena.set
-  
-  # $arena.get 1 30 gc/allocate "failed to allocate value" dieOnError
-  
-  $arena.get
-  [ "aaa" log dup 1 30 gc/allocate "failed to allocate value" dieOnError pop ]
-  loop
-  
-;
+:main @( 
+  (
+    ((1 2) (4 3) (5 6) (7 8) (10 9))
+  )
+  ( 
+    @example.each.ifLessThan.each
+    @cool.globalno
+  )
+  "neat @example@ :: @cool@ !" write
+);
+
+# :main
+#   {
+#     $test
+#     $arena
+#   }
+#   
+#   20000                                 # [: size
+#   10                                    # [: size roots
+#   gc/arena                              # [: arena-addr err
+#   "failed to allocate arena" dieOnError # [: arena-addr
+#   $arena.set
+#   
+#   # $arena.get 1 30 gc/allocate "failed to allocate value" dieOnError
+#   
+#   $arena.get
+#   [ "aaa" log dup 1 30 gc/allocate "failed to allocate value" dieOnError pop ]
+#   loop
+#   
+# ;

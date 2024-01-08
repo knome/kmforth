@@ -209,3 +209,124 @@
   
   `
 ;
+
+:syscall/socket/ipproto-tcp 6 ;
+:syscall/socket/sock-stream 1 ;
+:syscall/socket/pf-inet 2 ;
+
+% syscall/socket/create-socket-structure (@rc @st)
+  @ @rc @st (
+    (domain   type/u8)
+    (type     type/u8)
+    (protocol type/u8)
+  );
+;
+
+@ struct/define syscall/socket/create-socket-structure ;
+
+# [: protocol-family socket-type protocol
+# [: <fd> 0 | 0 <err>
+:syscall/socket { $data }
+  `
+  ; 41  family type protocol
+  ; rax rdi    rsi  rdx
+  sub r14,8
+  mov rdx, [r14]
+  sub r14,8
+  mov rsi, [r14]
+  sub r14,8
+  mov rdi, [r14]
+  mov rax, 41
+  syscall
+  
+  test rax, rax
+  jns .success  ; jump-not-signed
+  
+  ; on error, we negate (turn positive) and return the error code
+  mov qword [r14],0  ; push a 0 for the non-existent fd
+  add r14,8
+  neg rax
+  mov qword [r14],rax
+  add r14,8
+  jmp .leave
+  
+  .success:
+  mov [r14],rax
+  add r14,8
+  mov qword [r14],0
+  add r14,8
+  
+  .leave:
+  `
+;
+
+:syscall/bind/af-unspecified 0 ;
+:syscall/bind/af-unix        1 ; # unix socket
+:syscall/bind/af-inet        2 ; # ipv4
+:syscall/bind/af-ax25        3 ; # amatuer radio ax.25
+:syscall/bind/af-ipx         4 ; # novell ipx
+:syscall/bind/af-appletalk   5 ; # appletalk ddp
+:syscall/bind/af-netrom      6 ; # amatuer radio netrom
+:syscall/bind/af-bridge      7 ; # multiprotocol bridge
+:syscall/bind/af-aal5        8 ; # reserved for werner atm
+:syscall/bind/af-x25         9 ; # reserved for x.25 project
+:syscall/bind/af-inet6      10 ; # ipv6
+:syscall/bind/af-max        12 ; # 
+
+% syscall/bind/sockaddr-storage (@rc @st)
+  @ @rc @st (
+    (sin-family type/u16)
+  );
+;
+@ struct/define syscall/bind/sockaddr-storage ;
+
+% syscall/bind/sockaddr-in4 (@rc @st)
+  @ @rc @st (
+    (sin-family type/u16)
+    (sin-port   type/u16)
+    (sin-addr   type/u32)
+    (-unused-   type/u64)
+  );
+;
+@ struct/define syscall/bind/sockaddr-in4 ;
+
+% syscall/bind/sockaddr-in6 (@rc @st)
+  @ @rc @st (
+    (sin-family type/u16)
+    (sin-port   type/u16)
+    # unimplemented ipv6 shit
+  );
+;
+
+# [: fd sockaddr-pointer server-address-size
+# [: 0 | err
+:syscall/bind
+  `
+  ; 49  fd  &sockaddr addrlen
+  ; rax rdi rsi       rdx
+  
+  sub r14,8
+  mov rdx, [r14]
+  sub r14,8
+  mov rsi, [r14]
+  sub r14,8
+  mov rdi, [r14]
+  mov rax, 49
+  syscall
+  
+  test rax,rax
+  jns .success ; jump-not-signed
+  
+  ; error
+  neg rax
+  mov qword [r14],rax
+  add r14,8
+  jmp .leave
+  
+  .success:
+  mov qword [r14],0
+  add r14,8
+  
+  .leave:
+  `
+;

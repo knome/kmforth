@@ -15,13 +15,13 @@ Includes are modular (not text inserts) but the namespace is flat.
 
 Functions and macros can be defined in any order.
 
-If your macros recurse or expand infinitely, don't.
+If your macros expand recursively infinitely, don't.
 
 There's a datastack. Functions pop and push to it.
 
 There's a callstack. Return addresses and locals get shunted on and off it.
 
-The stack value is a union of anything that fits in a 64 bit slot.
+The stack value is a union of anything that fits in eight bytes.
 
 There is no type checking.
 
@@ -31,6 +31,8 @@ Good luck.
 
 everything assumes you're using `bash` on `linux`
 
+run this from the project root
+
 ``` bash
 ./tools/compile src/Example.code
 ```
@@ -38,3 +40,7 @@ everything assumes you're using `bash` on `linux`
 this will create `a.out`
 
 you will need `python3`, `nasm` and `ld` to compile code.
+
+# Language Reference
+
+look in LANGUAGE-REFERENCE

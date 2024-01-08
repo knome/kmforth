@@ -1,0 +1,171 @@
+
+# this is a comment
+
+# : defines a function. this one defines 'main'
+:main ;
+
+# this pushes a 3 onto the stack
+:main 3 ;
+
+# this pushes a 3 onto the stack and then pops it back off
+:main 3 pop ;
+
+# this pops when there is nothing on the stack and is WRONG
+:main pop ; # DO NOT POP AN EMPTY STACK
+
+# this one pushes a string onto the stack
+# not the string itself, though
+# just the address of the string
+# the string is immutable
+# if you try to change it, DONT
+:main "hello" ;
+
+# let's call a function
+# we'll call a function to print the string
+# this prints "hello"
+:main "hello" write ;
+
+# let's use a local variable
+# the local variable is 8 bytes in size
+# it lives in the call-return stack, not the stack-stack
+:main { $neat } ;
+
+# this one has a local variable that can hold a value of a specific size
+:main { $100.neat } ;
+
+# to interact with locals, use the special functions defined for each local you name
+# just naming them doesn't mean anything, so DONT
+:main { $neat } 
+  42 $neat.set # sets the local to 42
+  $neat.get    # pushes the local's value to the stack
+  $neat.get    # and again
+  pop pop      # let's get rid of that
+  $neat.addr   # pushes a pointer to the local onto the stack
+  pop          # not that we need it
+  $neat.here   # sets the local to the address of the next instruction
+  $neat.get    # the address would point at this neat.get. this neat.get is pushing the address onto the stack
+  $.jump       # this jumps to wherever the top of the stack says to go, which is the neat.get
+  # i n f i n i t e l o o p
+;
+
+# this one is DONT
+:main { $neat } $neat ; # what are you doing? I said not to do this. dummy.
+
+# this one has a lambda
+# the lambda just pushes the address of the lambda function onto the stack
+# inside the lambda, you can't access the outer function's local variables
+# it isn't a closure like most modern languages
+# you'll have to use the stack
+:main [] ;
+
+# let's actually call the lambda
+:main [] call ;
+
+# let's let it do something
+:main [ "hello" print ] call ;
+
+# let's call it a few times
+:main { $fn }
+  [ "hello" print ] $fn.set
+  $fn.get call
+  $fn.get call
+  $fn.get call
+;
+
+# m o r e - e a s i e r -  i n f i n i t e -  l o o p
+:main [] loop ;
+
+# much hello. very greeting.
+:main [ "hello" write ] loop ;
+
+# works
+:main { $100.neat }
+  $neat.addr
+;
+
+# does not work because .get, .set, and .here expect normal 8 byte locals
+:main { $100.neat }
+  $neat.here $neat.set $neat.get
+;
+
+# works, but why are you even specifing the default local size? goober.
+:main { $8.neat }
+  $neat.here $neat.set $neat.get
+;
+
+# this works for now because the compiler rounds up local sizes to a multiple of 8
+# but no promises it won't start packing single byte locals together into a single local entry
+# so if you DONT
+:main { $1.neat } $neat.get ;
+
+# if you don't know how this works, DONT
+:main
+  `
+    ; between the backticks is assembly language
+    ; the following assumptions are setup in :_start in STANDARD-STARTUP
+    ; if you don't use that, none of this documentation counts
+    ; r14 points to the next free data stack slot
+    ; r15 points to the next free return stack slot
+    ; the return stack has the locals shunted between return addresses
+    ; functions know how many locals they have, there's no way to dynamically unwind
+    ; unless you just do. whatever. blow up your own box. see if I care.
+    ; stacks grow up not down
+    ; remember to DONT
+  `
+;
+
+# there are macros for when you are lazy or want to make something hurt to read
+
+# this defines a named macro
+% hello (@s)
+  # this macro expands another macro, passing whatever it was given twice
+  @ world @s @s ;
+  # it also defines a function
+  : cool.@s ; # a word with a @ will expand the macro value and make a new word
+;
+
+# this expands that macro
+@ hello there ;
+
+# this uses a local macro
+:main @( (10) (@ten) @ten ) ;
+
+# :main @( (this is the arguments) (@this @is @the @parameters) this is the body that is expanded )
+
+# this inserts the local macro variable into a string
+# ( i n t e r p o l a t i o n )
+:main @( (10) (@ten) "@ten@" write ) ;
+
+# this counts from 10 back to 0
+# the .toZero expansion rule expands the macro body once for ever value it generates
+:main @( (10) (@ten.toZero) "@ten@" write ) ;
+
+# macros expand all variations of items to the right for each value a parameter receives
+# that means it expands the code body for ALL COMBINATIONS OF ALL VARIABLES
+# cartesian expansion across all variables. you have been warned. so have fun eating your computers memory.
+:main @( (10 10) (@left.toZero @right.toZero) "@left@ :: @right@" write ;
+
+# parentheses make a macrolist in the arguments
+# .each expands the body for each value in the macrolist
+:main @( ((10 10)) (@neat.each) "@neat@" write ;
+
+# there are a bunch of expansion rules
+# * each          : expand for each value in a macrolist
+# * count         : expand once with the number of entries in the macrolist
+# * first         : expand once with the first entry in a macrolist
+# * rest          : expand once with a macrolist containing all but the first entry of a macrolist
+# * toZero        : expand once for every value down including zero
+# * toOne         : expand once for every value down except stop at one instead of zero
+# * decr          : expand once with one less than the argument
+# * incr          : expand once with one more than the argument
+# * expandIf      : only expand if the value is truthy (not 0, "", or ())
+# * expandIfNot   : only expand if the value is falsy  (is 0, "", or ())
+# * ifNotEmpty    : only expand if the macrolist isnt empty
+# * equal         : only expand of all values in the macrolist are equal
+# * ifLessThan    : only expand if the macrolist is ordered least to greatest and also is never equal
+# * ifGreaterThan : only expand if the macrolist is ordered greatest to least and also is never equal
+# * globalno      : expands to a unique number, this parameter does not consume an argument
+
+# you can expand a local macro in the arguments, even in a macrolist
+# this is the same as @( ((10 9 8 7 6 5 4 3 2 1 0 10 9 8 7 6 5 4 3 2 1 0)) (@v.each) "@v@" write ) ;
+:main @( ( ( @((10)(@t.toZero)@t) @((10)(@t.toZero)@t) ) ) (@v.each) "@v@" write ) ;

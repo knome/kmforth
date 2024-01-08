@@ -1,0 +1,22 @@
+
+% network/dword-bits (@rc @st)
+  @ @rc @st (
+    (a type/u8)
+    (b type/u8)
+    (c type/u8)
+    (d type/u8)
+  );
+;
+@ struct/define network/dword-bits ;
+
+:qword-little-to-big { $in $out }
+  $in.set
+  0 $out.set
+  
+  $out.addr $in.addr network/dword-bits//a.get network/dword-bits//d.set
+  $out.addr $in.addr network/dword-bits//b.get network/dword-bits//c.set
+  $out.addr $in.addr network/dword-bits//c.get network/dword-bits//b.set
+  $out.addr $in.addr network/dword-bits//d.get network/dword-bits//a.set
+  
+  $out.get
+;

@@ -811,13 +811,31 @@ def parse_optional_locals( tokens ):
             break
         else:
             tokens.take()
-            if '.' in pt.value():
-                raise Exception( 'localfn name declarations cannot include a period (.): %s' % repr( pt ) )
-            elif pt.value() in seen:
+            
+            vv = pt.value()
+            sz = 8
+            if '.' in vv:
+                fore, aft = vv.split('.',1)
+                if not (fore[1:] and fore[1:].isdigit()):
+                    raise Exception(
+                        'localfn size designation must be a number divisible by 8 ($<size>.<name>), found %s' % pt
+                    )
+                else:
+                    vv = '$' + aft
+                    sz = int(fore[1:], 10)
+                    if sz < 1:
+                        raise Exception( 'localfn size designation must be an integer of 1 or greater' )
+                    if sz % 8 != 0:
+                        sz += 8 - sz % 8
+            
+            if '.' in vv:
+                raise Exception( 'localfn name cannot contain "." (must be $<size>.<name> or $<name>)' )
+            
+            if pt.value() in seen:
                 raise Exception( 'duplicate localfn name declaration: %s' % repr( pt ) )
             else:
-                seen.add( pt.value() )
-                localNames.append( pt.value() )
+                seen.add( vv )
+                localNames.append( (vv,sz) )
     
     ct = tokens.take()
     if not ct:
@@ -943,8 +961,23 @@ class Body:
     ):
         self._location = location
         self._commands = commands
-        self._localfns = localfns
         self._subfns   = subfns
+        
+        self._localfns      = []
+        self._localfnSizes  = {}
+        self._localfnSlotNo = {}
+        
+        slotno = 0
+        for (name,size) in localfns:
+            
+            if size % 8 != 0:
+                raise Exception( 'implementation error: localfn size not divisible by 8: %s' % repr( (name,size) ) )
+            
+            self._localfns.append(name)
+            self._localfnSizes[ name ] = size
+            self._localfnSlotNo[ name ] = slotno
+            slotno += size / 8
+        
         return
     
     def __repr__( self ):
@@ -953,11 +986,24 @@ class Body:
             repr( len( self._commands ) ) ,
         )
     
-    def location ( self ): return self._location
-    def commands ( self ): return self._commands
-    def nlocals  ( self ): return len( self._localfns )
-    def localfns ( self ): return self._localfns
-        
+    def location( self ):
+        return self._location
+    
+    def commands( self ):
+        return self._commands
+    
+    def localfns( self ):
+        return self._localfns
+    
+    def localfns_total_size( self ):
+        return sum( self._localfnSizes.values() )
+    
+    def localfn_size( self, name ):
+        if name not in self._localfnSizes:
+            raise Exception( 'implementation error: used name not in localfns: %s' % repr( name ) )
+        else:
+            return self._localfnSizes[ name ]
+    
     def subfns( self ):
         return self._subfns
     
@@ -965,11 +1011,7 @@ class Body:
         self ,
         name ,
     ):
-        try:
-            return self._localfns.index( name )
-        except ValueError:
-            # item not found
-            return None
+        return self._localfnSlotNo.get( name, None )
 
 def parse_include( initial, tokens, currentModule ):
     path = tokens.take()
@@ -2783,9 +2825,9 @@ def generate_code(
         code.append( '\n' )
         code.append( '  ' + fn + ':\n' )
         
-        if functions[ fn ].body().nlocals():
+        if functions[ fn ].body().localfns_total_size():
             code.append( '  ; make space for any locals\n' )
-            code.append( '  add r15, %d\n' % ( functions[ fn ].body().nlocals() * 8 ) )
+            code.append( '  add r15, %d\n' % ( functions[ fn ].body().localfns_total_size() ) )
         
         for command in functions[ fn ].body().commands():
             
@@ -2875,17 +2917,17 @@ def generate_code(
                         code.append( '    mov rax, [r14]\n' )
                         code.append( '    test rax,rax\n' )
                         code.append( '    jz %s\n' % label )
-                        if functions[ fn ].body().nlocals():
+                        if functions[ fn ].body().localfns_total_size():
                             code.append( '    ; (popping locals before leaving)\n' )
-                            code.append( '    sub r15, %d\n' % ( functions[fn].body().nlocals() * 8 ) )
+                            code.append( '    sub r15, %d\n' % ( functions[fn].body().localfns_total_size() ) )
                         code.append( '    sub r15, 8\n' )
                         code.append( '    jmp [r15]\n' )
                         code.append( '   %s:\n' % label )
                     elif builtin == '$.leave':
                         code.append( '    ; leave\n' )
-                        if functions[ fn ].body().nlocals():
+                        if functions[ fn ].body().localfns_total_size():
                             code.append( '    ; (popping locals before leaving)\n' )
-                            code.append( '    sub r15, %d\n' % ( functions[fn].body().nlocals() * 8 ) )
+                            code.append( '    sub r15, %d\n' % ( functions[fn].body().localfns_total_size() ) )
                         code.append( '    sub r15, 8\n' )
                         code.append( '    jmp [r15]\n' )
                     else:
@@ -2905,16 +2947,34 @@ def generate_code(
                             )
                         )
                     if memberfn == 'get':
+                        if functions[fn].body().localfn_size( localName ) != 8:
+                            raise Exception(
+                                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                                    repr( command ) ,
+                                )
+                            )
                         code.append( '    ; push local (%s) to datastack\n' % repr( localName ) )
                         code.append( '    mov rax, [r15-8*%d]\n' % (slotno+1) )
                         code.append( '    mov qword [r14], rax\n' )
                         code.append( '    add r14, 8\n' )
                     elif memberfn == 'set':
+                        if functions[fn].body().localfn_size( localName ) != 8:
+                            raise Exception(
+                                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                                    repr( command ) ,
+                                )
+                            )
                         code.append( '    ; pop datastack storing to local (%s)\n' % ( repr( localName ) ) )
                         code.append( '    sub r14, 8\n' )
                         code.append( '    mov rax, [r14]\n' )
                         code.append( '    mov qword [r15-8*%d], rax\n' % (slotno+1) )
                     elif memberfn == 'here':
+                        if functions[fn].body().localfn_size( localName ) != 8:
+                            raise Exception(
+                                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                                    repr( command ) ,
+                                )
+                            )
                         label = 'km_here_' + str(nns)
                         nns += 1
                         code.append( '    ; set local to label following this command\n' )
@@ -2941,9 +3001,9 @@ def generate_code(
             else:
                 raise Exception( 'wat %s %s' % ( str( command.kind() ), repr( command.value() ) ) )
         
-        if functions[ fn ].body().nlocals():
+        if functions[ fn ].body().localfns_total_size():
             code.append( '    ; pop any locals\n' )
-            code.append( '    sub r15, %d\n' % ( functions[ fn ].body().nlocals() * 8 ) )
+            code.append( '    sub r15, %d\n' % ( functions[ fn ].body().localfns_total_size() ) )
             
         code.append( '    sub r15, 8\n' )
         code.append( '    jmp [r15]\n' )

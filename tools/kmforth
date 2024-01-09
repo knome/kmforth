@@ -1340,6 +1340,7 @@ def parse_macro_parameter(
         'equal'         : ExpansionRuleEqual         ,
         'ifLessThan'    : ExpansionRuleIfLessThan    ,
         'ifGreaterThan' : ExpansionRuleIfGreaterThan ,
+        'collect'       : ExpansionRuleCollect       ,
         
         'expandno'      : ExpansionRuleExpandNo      ,
         'globalno'      : ExpansionRuleGlobalNo      ,
@@ -1432,7 +1433,7 @@ class ExpanderScalar:
         else:
             rule, location = self._expansionRules[0]
             source = rule( location = location )
-            for rule in self._expansionRules[1:]:
+            for rule, location in self._expansionRules[1:]:
                 source = rule(
                     location = location ,
                     source   = source   ,
@@ -1587,7 +1588,32 @@ class ExpansionRuleEach:
             for bit in value.bits():
                 yield bit
 
-class ExpansionRuleCount: pass
+class ExpansionRuleCount:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self     ,
+        location ,
+        source   ,
+    ):
+        self._location = location
+        self._source   = source
+        return
+    
+    def variations(
+        self ,
+    ):
+        cc = 0
+        for value in self._source.variations():
+            cc += 1
+        
+        yield Token(
+            location = self._location ,
+            kind     = 'integer'      ,
+            value    = cc             ,
+        )
 
 class ExpansionRuleFirst:
     @staticmethod
@@ -1878,6 +1904,33 @@ class ExpansionRuleIfGreaterThan:
             if isGreater:
                 yield value
 
+# gathers all variations of its source into a macrolist
+class ExpansionRuleCollect:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self     ,
+        location ,
+        source   ,
+    ):
+        self._location = location
+        self._source   = source
+        return
+    
+    def variations(
+        self ,
+    ):
+        bits = []
+        for value in self._source.variations():
+            bits.append( value )
+        
+        yield MacroList(
+            location = self._location ,
+            bits     = bits           ,
+        )
+
 # due to the way expansion currently operates, this doesn't do anything at all
 # it either spits out a single 0 which is used and reused by the following parameter expansions
 #   or it is instantiated anew for each combination of other parameter expansions.
@@ -1908,7 +1961,7 @@ class ExpansionRuleExpandNo:
         )
 
 class ExpansionRuleGlobalNo:
-    NN = [0]
+    NN = [1]
     
     @staticmethod
     def consumes_argument():

@@ -1,6 +1,128 @@
 
 # The kernel interface uses %rdi, %rsi, %rdx, %r10, %r8 and %r9.
 
+:syscall/SYSCALL-OPEN    2 ;
+:syscall/SYSCALL-CLOSE   3 ;
+:syscall/SYSCALL-MMAP    9 ;
+:syscall/SYSCALL-SOCKET 41 ;
+:syscall/SYSCALL-BIND   49 ;
+:syscall/SYSCALL-EXIT   60 ;
+
+# [: <rdi> <syscall-no>
+# [: <rax> 0 | 0 <err>
+:syscall/one
+  `
+  sub r14,8
+  mov rax,[r14]
+  sub r14,8
+  mov rdi,[r14]
+  syscall
+  
+  mov [r14],rax
+  add r14,8
+  
+  test rax,rax
+  jns .success ;
+  
+  neg rax
+  mov qword [r14],0
+  add r14,8
+  mov [r14], rax
+  add r14,8
+  jmp .done
+  
+  .success:
+  mov [r14],rax
+  add r14,8
+  mov qword [r14],0
+  add r14,8
+  
+  .done:
+  `
+;
+
+# [: <rdi> <rsi> <rdx> <syscall-no>
+# [: <rax> 0 | 0 <err>
+:syscall/three
+  `
+  sub r14,8
+  mov rax,[r14]
+  sub r14,8
+  mov rdx,[r14]
+  sub r14,8
+  mov rsi,[r14]
+  sub r14,8
+  mov rdi,[r14]
+  syscall
+  
+  mov [r14],rax
+  add r14,8
+  
+  test rax,rax
+  jns .success ;
+  
+  neg rax
+  mov qword [r14],0
+  add r14,8
+  mov [r14], rax
+  add r14,8
+  jmp .done
+  
+  .success:
+  mov [r14],rax
+  add r14,8
+  mov qword [r14],0
+  add r14,8
+  
+  .done:
+  `
+;
+
+# [: <rdi> <rsi> <rdx> <r10> <r8> <r9> <syscall-no>
+# [: <rax> 0 | 0 <err>
+:syscall/six
+  `
+  sub r14,8
+  mov rax,[r14]
+  
+  sub r14,8
+  mov r9,[r14]
+  sub r14,8
+  mov r8,[r14]
+  sub r14,8
+  mov r10,[r14]
+  sub r14,8
+  mov rdx,[r14]
+  sub r14,8
+  mov rsi,[r14]
+  sub r14,8
+  mov rdi,[r14]
+  
+  syscall
+  
+  mov [r14],rax
+  add r14,8
+  
+  test rax,rax
+  jns .success ;
+  
+  neg rax
+  mov qword [r14],0
+  add r14,8
+  mov [r14], rax
+  add r14,8
+  jmp .done
+  
+  .success:
+  mov [r14],rax
+  add r14,8
+  mov qword [r14],0
+  add r14,8
+  
+  .done:
+  `
+;
+
 # PROT_NONE            0x0
 # PROT_READ            0x1
 # PROT_WRITE           0x2
@@ -55,12 +177,8 @@
 ;
 
 :syscall/exit
-  `
-  sub r14, 8     ; pop exit code into rdi
-  mov rdi, [r14] ;
-  mov rax, 60    ; exit syscall
-  syscall
-  `
+  syscall/SYSCALL-EXIT
+  syscall/one
 ;
 
 # for desired-address
@@ -83,41 +201,22 @@
 # [: openfd protection-bits flags desired-address file-offset mapping-size
 # [: region-addr err
 # 
-:syscall/mmap
-  `
-  sub r14, 8     ; pop desired mapping size
-  mov rsi, [r14] ; 
-  sub r14, 8     ; pop desired mapping offset
-  mov r9, [r14]  ; 
-  sub r14, 8     ; pop desired mapping address ( 0 = don't care )
-  mov rdi, [r14] ; 
-  sub r14, 8     ; pop flags ( see notes top this file )
-  mov r10, [r14] ; 
-  sub r14, 8     ; pop protection bits ( see notes top this file )
-  mov rdx, [r14] ; 
-  sub r14, 8     ; pop open fd ( -1 = none )
-  mov r8, [r14]  ; 
-  mov rax, 9     ; mmap syscall
-  syscall
+:syscall/mmap { $fd $prot $flags $addr $offset $size }
+  $size.set
+  $offset.set
+  $addr.set
+  $flags.set
+  $prot.set
+  $fd.set
   
-  test rax,rax
-  jl .fail
-  
-  mov [r14], rax
-  add r14,8
-  mov qword [r14], 0
-  add r14,8
-  jmp .done
-  
- .fail:
-  mov qword [r14],0
-  add r14,8
-  neg rax
-  mov [r14], rax ;
-  add r14, 8 ;
-  
- .done:
-  `
+  $addr.get
+  $size.get
+  $prot.get
+  $flags.get
+  $fd.get
+  $offset.get
+  syscall/SYSCALL-MMAP
+  syscall/six
 ;
 
 :syscall/open/opt/accmode    0x00000003 ;
@@ -164,50 +263,18 @@
 # [: fd err
 # 
 :syscall/open
-  `
-  sub r14,8     ; pop mode
-  mov rdx,[r14] ; 
-  sub r14,8     ; pop flags
-  mov rsi,[r14] ; 
-  sub r14,8     ; pop path
-  mov rdi,[r14] ; 
-  mov rax,2     ; open syscall number
-  syscall
-  
-  test rax,rax
-  jl .fail
-  
-  mov [r14],rax
-  add r14,8
-  mov qword [r14],0
-  add r14,8
-  jmp .done
-  
- .fail:
-  mov qword [r14], 0
-  add r14,8
-  mov [r14], rax
-  add r14,8
-  
- .done:
-  `
+  syscall/SYSCALL-OPEN
+  syscall/three
 ;
 
 # [: fd
 # [: 
 # 
 :syscall/close
-  `
-  sub r14,8     ; pop fd
-  mov rdi,[r14] ;
-  mov rax,3     ; close syscall number
-  syscall
-  
-  ; we have to ignore if close fails
-  ; as it still closes the fd
-  ; it's most likely a lingering data write failure
-  
-  `
+  syscall/SYSCALL-CLOSE
+  syscall/one
+  # do not retry on EINTR as it still closes the fd
+  # it just had some other interuption we can no longer safely handle
 ;
 
 :syscall/socket/ipproto-tcp 6 ;
@@ -227,37 +294,8 @@
 # [: protocol-family socket-type protocol
 # [: <fd> 0 | 0 <err>
 :syscall/socket { $data }
-  `
-  ; 41  family type protocol
-  ; rax rdi    rsi  rdx
-  sub r14,8
-  mov rdx, [r14]
-  sub r14,8
-  mov rsi, [r14]
-  sub r14,8
-  mov rdi, [r14]
-  mov rax, 41
-  syscall
-  
-  test rax, rax
-  jns .success  ; jump-not-signed
-  
-  ; on error, we negate (turn positive) and return the error code
-  mov qword [r14],0  ; push a 0 for the non-existent fd
-  add r14,8
-  neg rax
-  mov qword [r14],rax
-  add r14,8
-  jmp .leave
-  
-  .success:
-  mov [r14],rax
-  add r14,8
-  mov qword [r14],0
-  add r14,8
-  
-  .leave:
-  `
+  syscall/SYSCALL-SOCKET
+  syscall/three
 ;
 
 :syscall/bind/af-unspecified 0 ;
@@ -301,32 +339,6 @@
 # [: fd sockaddr-pointer server-address-size
 # [: 0 | err
 :syscall/bind
-  `
-  ; 49  fd  &sockaddr addrlen
-  ; rax rdi rsi       rdx
-  
-  sub r14,8
-  mov rdx, [r14]
-  sub r14,8
-  mov rsi, [r14]
-  sub r14,8
-  mov rdi, [r14]
-  mov rax, 49
-  syscall
-  
-  test rax,rax
-  jns .success ; jump-not-signed
-  
-  ; error
-  neg rax
-  mov qword [r14],rax
-  add r14,8
-  jmp .leave
-  
-  .success:
-  mov qword [r14],0
-  add r14,8
-  
-  .leave:
-  `
+  syscall/SYSCALL-BIND
+  syscall/three
 ;

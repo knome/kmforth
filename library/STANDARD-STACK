@@ -23,6 +23,37 @@
   `
   ;
 
+# [: todo size
+# <calls: buffer todo>
+# [: <whatever-todo-did>
+:stack/call-with-stack-buffer
+  dup 8 %              # [: todo size <is-size-not-modulo-8>
+  [
+    dup    # [: todo size size
+    8 %    # [: todo size <size%8>
+    8 swap # [: todo size 8 <size%8>
+    -      # [: todo size <size-size%8>
+    +      # [: todo <size+(size-size%8)>
+  ]                    # [: todo size <is-size-not-modulo-8> <fixer-upper>
+  $.callIf             # [: todo size | todo <size-adjusted-if-not-modulo-8>
+  `
+  mov rax,r15            ; save current end of r15 (slot after return-addr)
+  sub r14,8
+  add r15,[r14]          ; bump the callstack by sizeof(buffer), popping the size off the datastack
+  add r15,16             ; bump callstack by 16
+                         ;   8 for saving previous callstack location
+                         ;   8 for return-address
+  mov qword [r15-16],rax ; save the previous callstack end after the buffer 
+  mov qword [r15-8],.rt  ; save the return address to the callstack
+  mov rbx, [r14-8]       ; grab the 'todo' without popping the datastack
+  mov qword [r14-8],rax  ; replace it with the saved (slot-after-return-addr), which is where our buffer is
+  jmp rbx                ; goto whatever 'todo' is
+  .rt:                   ; 'todo' returns here
+  mov r15,[r15-8]        ; use the saved previous-callstack to reset the callstack to wherever it is supposed to be
+                         ; explode or get hacked because of buffer overflow nuking the saved callstack restore value
+  `
+;
+
 :decr `dec qword [r14-8]` ;
 :incr `inc qword [r14-8]` ;
 

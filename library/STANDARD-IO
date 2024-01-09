@@ -71,7 +71,7 @@
 # [: filename
 # [: fd err
 # 
-:createNewFile
+:create-new-file
   syscall/open/opt/readwrite syscall/open/opt/create or
   syscall/open/opt/exclusive or
   syscall/open/mode/standard-file
@@ -81,7 +81,7 @@
 # [: filename
 # [: fd err
 # 
-:createNewPrivateFile
+:create-new-private-file
   syscall/open/opt/readwrite syscall/open/opt/create or
   syscall/open/opt/exclusive or
   syscall/open/mode/owner/readwrite
@@ -91,17 +91,18 @@
 # [: filename
 # [: fd err
 # 
-:openExistingFile
+:open-existing-file
   syscall/open/opt/readwrite
   syscall/open/mode/standard-file
   syscall/open
 ;
 
 # [: fd
-# [:
+# [: err
 # 
 :close
   syscall/close
+  swap pop
 ;
 
 # [: "string"
@@ -173,7 +174,9 @@
 # n/a
 # 
 :exit
-  syscall/exit
+  syscall/SYSCALL-EXIT syscall/one
+  "implementation error - exit failed?" log
+  [] loop
 ;
 
 # this should be replaced when we are able to do strings properly in the gc

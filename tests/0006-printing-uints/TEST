@@ -1,0 +1,17 @@
+
+@ "STANDARD" ;
+
+:printno
+  [
+                              # [: value buffer=(number-buffer (tmp, on callstack))
+    string/unsigned-to-ascii  # [: <string-pointer>
+    print pop                 # [:
+  ] strings/number-buffer.size stack/call-with-stack-buffer
+;
+
+:main
+  1  printno
+  42 printno
+  0  printno
+  -1 printno
+;

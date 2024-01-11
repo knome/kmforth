@@ -1,0 +1,16 @@
+
+@ "STANDARD" ;
+
+:main
+  "hello"
+  " "
+  "darkness"
+  " "
+  "my"
+  " "
+  "old"
+  " "
+  "friend"
+  "."
+  10 write-strings
+;

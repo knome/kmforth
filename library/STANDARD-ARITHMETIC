@@ -1,4 +1,6 @@
 
+:neg ` neg qword [r14-8] ` ;
+
 # a b >  is  a > b
 # 
 :>
@@ -20,6 +22,8 @@
   `
 ;
 
+:<= > [ 0 ][ 1 ] if ;
+
 # a b <  is  a < b
 # 
 :<
@@ -40,6 +44,8 @@
  .out:
   `
 ;
+
+:>= < [ 0 ][ 1 ] if ;
 
 :+
   `
@@ -154,16 +160,7 @@
   `
 ;
 
-# [: left right
-# 
-:<= { $right }
-  $right.set         # [: left
-  
-  dup                # [: left left
-  $right.get <       # [: left (left<right)
-  swap $right.get == # [: (left<right) (left==right)
-  or                 # [: (left<right|left==right)
-;
+:!= == [ 0 ][ 1 ] if ;
 
 # left-shift
 # 

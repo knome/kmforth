@@ -2,5 +2,5 @@
 @ "STANDARD" ;
 
 :main
-  5 3 % 2 ==  not "bad math" dieOnError
+  5 3 % 2 ==  not "bad math" or-die
 ;

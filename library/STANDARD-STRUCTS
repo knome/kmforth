@@ -33,63 +33,85 @@
 :type/u64.set  memory/poke-q ;
 :type/u64.get  memory/peek-q ;
 
-# for
-#   @ accessors structName ( (fieldName fieldType) )
-# expandsTo
-#   : structName/fieldName.get 'field offset calculation' 'type appropriate peek-q' ;
-#   : structName/fieldName.set 'field offset calculation' 'type appropriate poke-q' ;
-#   : structName/fieldName.size 'size calculation used in field offset calculations' ;
-#   etc
+:type/pointer.size type/u64.size ;
+:type/pointer.set  type/u64.set  ;
+:type/pointer.get  type/u64.get  ;
+
+# user defines a macro of form % name (@rc @st) @ @rc @st ( (field type) (field type) (field type count) ...etc... )
+# they then call @ struct/define name ; # (rc=recursive-call st=state)
+# our macro then calls their macro with its internal bits ready to go
+# they could just call it directly, but making them use a macro will let me create recursive structure definitions eventually
 # 
 % struct/define (@definition)
   @ @definition struct/-with-definition @definition ;
 ;
 
+# annotate the (name type) and (name type reps) items as (@fn @ft @is-array @items)
+# annotate the 2 items ones as (@fn @ft 0 1) # 1 because we use reps*size in the field-addr calculations
+# then expand the .set/etc functions for 1 and the .nth.set/etc functions for otherwise
+# 
 % struct/-with-definition ( @name @fields )
-  @ struct/-define @name @fields ;
+  @ struct/-define
+      @name
+      (
+          @(
+              (@fields)
+              (@f.each)
+              @(
+                  (@f)
+                  (@fc.count)
+                  @(
+                      ((@fc 2) @f)
+                      (@e.ifEqual (@fn @ft))
+                      (@fn @ft 0 1)
+                  )
+                  @(
+                      ((@fc 3) @f)
+                      (@e.ifEqual (@fn @ft @fr))
+                      (@fn @ft 1 @fr)
+                  )
+              )
+          )
+      )
+  ;
 ;
 
 % struct/-define (@name @fields)
   @ struct/-with-mapping-window struct/-define-field-accessors @name @fields ;
-  : @name.size 0 @( (@fields) (@f.each) @( (@f) ((@fn @ft)) @ft.size + ) ) ;
+  
+  # struct-level functions
+  
+  : @name.size 0 @( (@fields) (@f.each) @( (@f) ((@fn @ft @fa @fr)) @ft.size @fr * + ) ) ;
 ;
 
-% struct/-define-field-accessors ( @name @before (@fieldName @fieldType) @after )
+% struct/-define-field-accessors ( @name @before (@fieldName @fieldType @fieldIsArray @fieldRepetitions) @after )
+  @ struct/-define-array-accessors  @name @before @fieldName @fieldType @fieldIsArray @fieldRepetitions @after ;
+  @ struct/-define-scalar-accessors @name @before @fieldName @fieldType @fieldIsArray @fieldRepetitions @after ;
   
-  # [: structaddr
-  # [: fieldvalue
-  # 
-  : @name//@fieldName.get
-    @name//@fieldName.addr
-    @fieldType.get
-  ;
-  
-  # [: structaddr value
-  # [: 
-  # 
-  : @name//@fieldName.set { $value }
-    $value.set
-    @name//@fieldName.addr
-    $value.get
-    @fieldType.set
-  ;
-  
-  # [: 
-  # [: size
-  # 
-  : @name//@fieldName.size
-    @fieldType.size
-  ;
+  # common accessors
   
   # [: structaddr
   # [: fieldaddr
   # 
   : @name//@fieldName.addr
-    0 @( (@before) (@b.each) @( (@b) ((@fn @ft)) @ft.size + ) ) +
+    0 @( (@before) (@b.each) @( (@b) ((@fn @ft @fa @fr)) @ft.size @fr * + ) ) +
+  ;
+;  
+
+% struct/-define-array-accessors (@name @before @fieldName @fieldType @fieldIsArray.expandIf @fieldRepetitions @after)
+  
+  # [:
+  # [: <number-of-entries>
+  # 
+  : @name//@fieldName.entries
+    @fieldRepetitions
   ;
   
-  # these following accessors depend on the user to know
-  # when a field is an array and when it is not.
+  # [:
+  # [: <last-index>
+  : @name//@fieldName.last-index
+    @fieldRepetitions 1 -
+  ;
   
   # [: structaddr index
   # [: &fieldValue[ index ]
@@ -117,6 +139,34 @@
     $value.get                 # [: &fieldaddr[ index ] value
     @fieldType.set             # [:
   ;
+;
+
+% struct/-define-scalar-accessors (@name @before @fieldName @fieldType @fieldIsArray.expandIfNot @fieldRepetitions @after)
+  
+  # [: 
+  # [: size
+  # 
+  : @name//@fieldName.size
+    @fieldType.size
+  ;
+  
+  # [: structaddr
+  # [: fieldvalue
+  # 
+  : @name//@fieldName.get
+    @name//@fieldName.addr
+    @fieldType.get
+  ;
+  
+  # [: structaddr value
+  # [: 
+  # 
+  : @name//@fieldName.set { $value }
+    $value.set
+    @name//@fieldName.addr
+    $value.get
+    @fieldType.set
+  ;
   
   # [: structaddr
   # [: 
@@ -137,6 +187,7 @@
     1 -
     $fieldAddr.get swap @fieldType.set
   ;
+
 ;
 
 # for

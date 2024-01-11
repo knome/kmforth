@@ -1,9 +1,14 @@
 
 # The kernel interface uses %rdi, %rsi, %rdx, %r10, %r8 and %r9.
 
+:syscall/STDIN  0 ;
+:syscall/STDOUT 1 ;
+:syscall/STDERR 2 ;
+
 :syscall/SYSCALL-OPEN    2 ;
 :syscall/SYSCALL-CLOSE   3 ;
 :syscall/SYSCALL-MMAP    9 ;
+:syscall/SYSCALL-WRITEV 20 ;
 :syscall/SYSCALL-SOCKET 41 ;
 :syscall/SYSCALL-BIND   49 ;
 :syscall/SYSCALL-EXIT   60 ;
@@ -17,28 +22,11 @@
   sub r14,8
   mov rdi,[r14]
   syscall
-  
-  mov [r14],rax
-  add r14,8
-  
-  test rax,rax
-  jns .success ;
-  
-  neg rax
-  mov qword [r14],0
-  add r14,8
-  mov [r14], rax
-  add r14,8
-  jmp .done
-  
-  .success:
-  mov [r14],rax
-  add r14,8
-  mov qword [r14],0
-  add r14,8
-  
-  .done:
   `
+  dup 0 <                 # rv (rv<0)
+  [ 0 swap neg ]          # rv (<) ontrue
+  [ 0 ]                   # rv (<) ontrue onfalse
+  if                      # 0 err | rv=amount 0
 ;
 
 # [: <rdi> <rsi> <rdx> <syscall-no>
@@ -57,25 +45,11 @@
   
   mov [r14],rax
   add r14,8
-  
-  test rax,rax
-  jns .success ;
-  
-  neg rax
-  mov qword [r14],0
-  add r14,8
-  mov [r14], rax
-  add r14,8
-  jmp .done
-  
-  .success:
-  mov [r14],rax
-  add r14,8
-  mov qword [r14],0
-  add r14,8
-  
-  .done:
   `
+  dup 0 <                 # rv (rv<0)
+  [ 0 swap neg ]          # rv (<) ontrue
+  [ 0 ]                   # rv (<) ontrue onfalse
+  if                      # 0 err | rv=amount 0
 ;
 
 # [: <rdi> <rsi> <rdx> <r10> <r8> <r9> <syscall-no>
@@ -102,25 +76,12 @@
   
   mov [r14],rax
   add r14,8
-  
-  test rax,rax
-  jns .success ;
-  
-  neg rax
-  mov qword [r14],0
-  add r14,8
-  mov [r14], rax
-  add r14,8
-  jmp .done
-  
-  .success:
-  mov [r14],rax
-  add r14,8
-  mov qword [r14],0
-  add r14,8
-  
-  .done:
   `
+  dup 0 <                 # rv (rv<0)
+  [ 0 swap neg ]          # rv (<) ontrue
+  [ 0 ]                   # rv (<) ontrue onfalse
+  if                      # 0 err | rv=amount 0
+
 ;
 
 # PROT_NONE            0x0
@@ -268,13 +229,13 @@
 ;
 
 # [: fd
-# [: 
+# [: err
 # 
 :syscall/close
   syscall/SYSCALL-CLOSE
   syscall/one
-  # do not retry on EINTR as it still closes the fd
-  # it just had some other interuption we can no longer safely handle
+  # discard value, keep err
+  swap pop
 ;
 
 :syscall/socket/ipproto-tcp 6 ;
@@ -341,4 +302,21 @@
 :syscall/bind
   syscall/SYSCALL-BIND
   syscall/three
+  # discard value, keep err
+  swap pop
+;
+
+% syscall/iovec (@rc @st)
+  @ @rc @st (
+    (base type/pointer)
+    (len  type/u64)
+  );
+;
+@ struct/define syscall/iovec ;
+
+# [: fd iovec len
+# [: amount 0 | 0 err
+:syscall/writev
+  syscall/SYSCALL-WRITEV  # fd iovec len call
+  syscall/three           # rv
 ;

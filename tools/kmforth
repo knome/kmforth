@@ -13,11 +13,12 @@ import re
 import binascii
 
 G_SHOW_EXPANSIONS = False
+G_EXPANSION_ID = [0]
 
 NUMBERS  = set( '0123456789' )
 LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz' )
 
-WORDSTART = LETTERS.union( set('_+-/*<>-%=.@') )
+WORDSTART = LETTERS.union( set('_+-/*<>-%=.@!') )
 WORDBITS  = WORDSTART.union( NUMBERS )
 
 STRUCTBITS = ':;[]{}()'
@@ -344,6 +345,8 @@ class Token:
             return repr( self._value )
         elif self.kind() == 'code':
             return '`' + repr( self._value )[1:-1] + '`'
+        elif self._value == None:
+            return self._kind
         else:
             return str(self._value)
 
@@ -1337,7 +1340,7 @@ def parse_macro_parameter(
         'expandIf'      : ExpansionRuleExpandIf      ,
         'expandIfNot'   : ExpansionRuleExpandIfNot   ,
         'ifNotEmpty'    : ExpansionRuleIfNotEmpty    ,
-        'equal'         : ExpansionRuleEqual         ,
+        'ifEqual'       : ExpansionRuleIfEqual       ,
         'ifLessThan'    : ExpansionRuleIfLessThan    ,
         'ifGreaterThan' : ExpansionRuleIfGreaterThan ,
         'collect'       : ExpansionRuleCollect       ,
@@ -1382,6 +1385,9 @@ class MacroParameter:
     
     def consumes_argument( self ):
         return self._expander.consumes_argument()
+    
+    def simple( self ):
+        return '<macro-parameter namer=%s>' % self._namer.simple()
 
 class Variations:
     def __init__(
@@ -1451,6 +1457,9 @@ class NamerScalar:
     
     def names( self, value ):
         yield (self._name, value)
+        
+    def simple( self ):
+        return '<scalar-namer %s>' % repr( self._name )
 
 class ExpanderMacroList:
     def __init__(
@@ -1565,6 +1574,9 @@ class NamerMacroList:
         for pp, vv in zip( self._parameterList, value.bits() ):
             for naming in pp.namer().names( vv ):
                 yield naming
+    
+    def simple( self ):
+        return '<macrolist-namer %s>' % repr([ pp.namer().simple() for pp in self._parameterList ])
 
 class ExpansionRuleEach:
     @staticmethod
@@ -1605,15 +1617,17 @@ class ExpansionRuleCount:
     def variations(
         self ,
     ):
-        cc = 0
         for value in self._source.variations():
-            cc += 1
-        
-        yield Token(
-            location = self._location ,
-            kind     = 'integer'      ,
-            value    = cc             ,
-        )
+            if value.kind() != 'macrolist':
+                raise Exception( '.count expected macrolist, found %s' % repr( value ) )
+            
+            cc = len( list( value.bits() ) )
+            
+            yield Token(
+                location = self._location ,
+                kind     = 'integer'      ,
+                value    = cc             ,
+            )
 
 class ExpansionRuleFirst:
     @staticmethod
@@ -1768,7 +1782,7 @@ class ExpansionRuleIncr:
     def variations( self ):
         for value in self._source.variations():
             if value.kind() != 'integer':
-                raise Exception( '.decr received non-integer: %s' % repr( value ) )
+                raise Exception( '.incr received non-integer: %s' % repr( value ) )
             else:
                 new = value.value() + 1
                 yield Token(
@@ -1805,7 +1819,33 @@ class ExpansionRuleExpandIf:
             else:
                 raise Exception( '.expandIf expects integers, strings or macrolists, found %s' % repr( value ) )
     
-class ExpansionRuleExpandIfNot: pass
+class ExpansionRuleExpandIfNot:
+    # truthiness: anything not 0 () or ""
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self     ,
+        location ,
+        source   ,
+    ):
+        self._location = location
+        self._source   = source
+        
+    def variations( self ):
+        for value in self._source.variations():
+            if value.kind() == 'integer':
+                if not value.value():
+                    yield value
+            elif value.kind() == 'string':
+                if not value.value():
+                    yield value
+            elif value.kind() == 'macrolist':
+                if not value.bits():
+                    yield value
+            else:
+                raise Exception( '.expandIf expects integers, strings or macrolists, found %s' % repr( value ) )
     
 class ExpansionRuleIfNotEmpty:
     @staticmethod
@@ -1830,7 +1870,48 @@ class ExpansionRuleIfNotEmpty:
             if value.bits():
                 yield value
 
-class ExpansionRuleEqual: pass
+class ExpansionRuleIfEqual:
+    @staticmethod
+    def consumes_argument():
+        return True
+    
+    def __init__(
+        self     ,
+        location ,
+        source   ,
+    ):
+        self._location = location
+        self._source   = source
+        
+    def variations(
+        self ,
+    ):
+        for value in self._source.variations():
+            if value.kind() != 'macrolist':
+                raise Exception( '.ifEqual expected a macrolist, found %s' % repr( value ) )
+            
+            last    = None
+            isEqual = True
+            for bit in value.bits():
+                if bit.kind() not in [ 'string', 'integer' ]:
+                    raise Exception( '.ifEqual only operates on macrolists of strings and integers, found %s' % repr( bit ) )
+                if last == None:
+                    last = bit
+                else:
+                    if bit.kind() != last.kind():
+                        raise Exception( '.ifEqual does not allow mixing integers and strings, found %s after %s' % (
+                            repr( bit     ) ,
+                            repr( lastBit ) ,
+                        ))
+                    elif bit.value() == last.value():
+                        # good
+                        continue
+                    else:
+                        isEqual = False
+                        break
+            
+            if isEqual:
+                yield value
     
 class ExpansionRuleIfLessThan:
     @staticmethod
@@ -2362,7 +2443,7 @@ def expand_macro(
     macroContext   ,
 ):
     if G_SHOW_EXPANSIONS:
-        log( 'EXPANDING', macroExpansion.simple() )
+        log( 'EXPANDING-NAMED', macroExpansion.simple() )
     
     if not macroContext.has_macro( macroExpansion.macro_name().value() ):
         raise Exception( 'unknown macro definition: %s' % macroExpansion.macro_name() )
@@ -2479,7 +2560,10 @@ def chain_argument_sources( sources, _left = None ):
                 for group in chain_argument_sources( remaining, _left + tuple( source.namer().names( vv ) ) ):
                     yield group
             else:
-                yield _left + tuple( source.namer().names( vv ) )
+                chained = _left + tuple( source.namer().names( vv ) )
+                # if G_SHOW_EXPANSIONS:
+                #     log( 'CHAINED', chained )
+                yield chained
     else:
         yield _left
 
@@ -2536,11 +2620,22 @@ def expand_bitstream(
         elif bit.kind() == 'macrovar':
             yield macroContext.expand_macrovar( bit )
         elif bit.kind() == '@':
+            if G_SHOW_EXPANSIONS:
+                EXPANSIONID = G_EXPANSION_ID[0]
+                G_EXPANSION_ID[0] += 1
+                EXPANDED = []
+            else:
+                EXPANSIONID = 'NOT-EXPANDING'
             for bit in extract_and_expand_local_macro(
                 macroContext = macroContext ,
                 tokens       = tokens       ,
+                expansionId  = EXPANSIONID  ,
             ):
+                if G_SHOW_EXPANSIONS:
+                    EXPANDED.append( bit )
                 yield bit
+            if G_SHOW_EXPANSIONS:
+                log( 'EXPANDED-LOCAL', 'XID=', EXPANSIONID, 'TO', repr(' '.join([ E.simple() for E in EXPANDED ])) )
         elif bit.kind() == 'macrostring':
             yield expand_macrostring(
                 macroContext = macroContext ,
@@ -2552,7 +2647,13 @@ def expand_bitstream(
                 macroCode    = bit          ,
             )
         elif bit.kind() == 'macrolist':
-            yield bit
+            yield MacroList(
+                location = bit.location()                 ,
+                bits     = list(expand_bitstream(
+                    macroContext = macroContext ,
+                    tokens       = Source( bit.bits() ) ,
+                )),
+            )
         elif bit.kind() in [ ';', '{', '}', '[', ']', '(', ')', 'localfn', 'word', 'integer', 'string', 'code' ]:
             yield bit
         else:
@@ -2637,6 +2738,7 @@ def expand_macrocode(
 def extract_and_expand_local_macro(
     macroContext ,
     tokens       ,
+    expansionId  ,
 ):
     # ( () () ... )
     # 
@@ -2664,6 +2766,14 @@ def extract_and_expand_local_macro(
         bodyBits = list( capture_balanced_bits_til_terminator(
             tokens ,
         ))
+        
+        if G_SHOW_EXPANSIONS:
+            log(
+                'EXPANDING-LOCAL', 'XID=', expansionId ,
+                'arguments='     , repr(' '.join([ A.simple() for A in arguments  ])) ,
+                'parameters='    , repr(' '.join([ P.simple() for P in parameters ])) ,
+                'bodyBits='      , repr(' '.join([ B.simple() for B in bodyBits   ])) ,
+            )
         
         end = tokens.take()
         if not end:
@@ -3038,6 +3148,12 @@ def generate_code(
                         code.append( '    lea  rax,[r15-8*%d]\n' % (slotno+1) )
                         code.append( '    mov  [r14],rax\n' )
                         code.append( '    add  r14,8\n' )
+                    elif memberfn == 'incr':
+                        code.append( '    ; incr local (%s) in-place\n' % repr( localName ) )
+                        code.append( '    inc qword [r15-8*%d]\n' % (slotno+1) )
+                    elif memberfn == 'decr':
+                        code.append( '    ; incr local (%s) in-place\n' % repr( localName ) )
+                        code.append( '    dec qword [r15-8*%d]\n' % (slotno+1) )
                     else:
                         raise Exception( 'unknown localfn ( expecting <local>.get or <local>.set ): %s' % repr( command.value() ) )
                     

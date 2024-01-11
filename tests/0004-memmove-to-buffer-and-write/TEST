@@ -2,11 +2,11 @@
 @ "STANDARD" ;
 
 :main
-  10000 memory/map-region "narp" dieOnError
-  dup              # [: range range
-  "hello, world"   # [: range range "hw"
-  dup              # [: range range "hw" "hw"
-  cstr/length 1 +  # [: range range "hw" (len("hw")+1)
-  memory/memmove   # [: range
-  write            # [: 
+  10000 memory/map-region "narp" or-die
+  dup               # [: range range
+  "hello, world"    # [: range range "hw"
+  dup               # [: range range "hw" "hw"
+  string/length 1 + # [: range range "hw" (len("hw")+1)
+  memory/memmove    # [: range
+  write             # [: 
 ;

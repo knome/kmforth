@@ -1,0 +1,16 @@
+
+we're eventually going to need somewhere to annotate functions
+I think this syntax looks reasonable
+we'll need to update the parser to allow multiple definitions where they have *
+we'll further require they all appear in the same file, and we'll take the first definition
+  whose requirements are fulfilled by our current values
+  
+after the ** will come optimization information, allowing functions to describe conditions they can be turned to constants, etc
+attrs, rather than being requirements, are annotations used for optimization
+
+I'll save the precise syntax for that trash for later
+
+:main { $hello * os=linux, features=fpu,vme,xtopology ** ... }
+  -1 writeno
+  -1 writenosize
+;

@@ -1,19 +1,100 @@
 
-# [: size
-# :string/buffer
-#   map-region              # [: buffer
-#   dup 0 memory/poke-q     # [: buffer (with first word = 0
-#   dup 8 + 0 memory/poke-q # [: buffer (with second word = 0
-# ;
-
-# [: buffer cstr
-# [: buffer refno
+# a buffer specifically large enough to convert a number into a string
 # 
-# :string/from-cstr { $cstr $buffer }
-#   $cstr.set
-#   dup $buffer.set
-# ;  
+% strings/number-buffer (@rc @st)
+  @ @rc @st (
+    (bytes type/u8 24) # we only need 21 (including newline), but this makes it align nicely with the 8byte per entry stack
+  );
+;
+@ struct/define strings/number-buffer ;
 
-# [: string-buffer cstr
-# :string/from-cstr
+# [: value number-buffer
+# [: <pointer-to-start-of-string-in-buffer>
+:string/unsigned-to-ascii { $buffer $offset $loop }
+  $buffer.set                                 # [: value
+  
+  strings/number-buffer//bytes.last-index     # [: value <last-index>
+  $offset.set                                 # [: value
+  
+  $buffer.get $offset.get 0                   # [: value buffer offset nul
+  strings/number-buffer//bytes.nth.set        # [: value
+  
+  $offset.decr
+  
+  $loop.here
+  
+  dup 10 %                                    # [: value <value mod 10>
+  48 +                                        # [: value <ascii-digit>
+  
+  $buffer.get swap                            # [: value <buffer> <ascii-digit>
+  $offset.get swap                            # [: value <buffer> <write-index> <ascii-digit>
+  strings/number-buffer//bytes.nth.set        # [: value
+  
+  10 /                                        # [: (value/10)
+  $offset.decr                                # [: so we'll write to the next spot back
+  
+  dup                                         # [: (value/10) (value/10)
+  
+  $loop.get                                   # [: (value/10) (value/10) <there>
+  $.jumpIf                                    # [: (value/10)
+  
+  #                                           # [: 0
+  pop                                         # [:
+  
+  $offset.incr
+  $buffer.get $offset.get                     # [: buffer offset
+  strings/number-buffer//bytes.nth.addr       # [: <addr-of-start-of-string>
+;
+
+:string/length
+  `
+  sub r14, 8             ; pop the pointer to the string
+  mov rax, [r14]         ; 
+  mov rbx, 0             ; we'll track the length here
+  
+ .next:
+  mov ch, byte [rax+rbx] ; grab the next character in the string
+  test ch, ch            ; see if it is 0
+  jz .done               ; if its nul, we're at the end, jump
+  inc rbx                ; otherwise bump our counter
+  jmp .next              ; and loop
+ .done:
+  mov [r14], rbx         ; push the string length onto the stack
+  add r14, 8             ; 
+  `
+;
+
+# # string buffer
+# # a checked buffer for building up strings before writing them as a whole
+# 
+# % strings/-string-buffer-header (@rc @st)
+#   @ @rc @st (
+#     (size   type/u32)
+#     (cursor type/u32)
+#     (end    type/u8 0) # takes no space in the header but allows us to index the rest of the buffer
+#   );
+# @ struct/define strings/-string-buffer-header ;
+# 
+# # initializes any given buffer to be a string-buffer
+# # 
+# # [: buffer buffersize
+# # [: err
+# :strings/initialize-string-buffer { $size }
+#   #                                                     # [: buffer buffersize
+#   dup strings/-string-buffer-header.size 1 + <          # [: buffer buffersize (<)=(buffer<minimum-size)
+#   dup                                                   # [: buffer buffersize (<) (<)
+#   [
+#     # [: buffer buffersize (<)
+#     pop pop pop
+#     "buffer too small to be used as string-buffer" 1
+#   ] $.callIf                                            # [: err (<) | buffer buffersize (<)
+#   $.leaveIf                                             # [: err     | buffer buffersize
+#   
+#   $size.set                                             # [: buffer
+#   dup $size.get strings/-string-buffer-header//size.set # [: buffer
+#   
+#   dup 0 strings/-string-buffer-header//cursor.set       # [: buffer
+#   0 0 strings/-string-buffer-header//end.nth.set        # [: buffer
+#   
+#   0                                                     # [: <no-err>
 # ;

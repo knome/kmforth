@@ -3,13 +3,26 @@
 # stack manipulation functions
 # 
 
-:dup
+:dup { $a }
+  $a.set
+  $a.get
+  $a.get
+;
+
+# push the nth stack item
+# 0 is the first element on the stack, ignoring <index>
+# 
+# [: index
+:nth
   `
-  mov rax, [r14-8] ; push whatever is on the top again
-  mov [r14], rax  
-  add r14, 8
+  mov rax,[r14-8]  ; index
+  shl rax,3        ; (index*8)
+  neg rax          ; (-(index*8))
+  add rax,r14      ; <addr of desired item on stack>
+  mov rbx,[rax-16] ; copy item (16 down to ignore stack & drop below first element so 0 = top)
+  mov [r14-8],rbx  ; put on top of stack replacing index
   `
-  ;
+;
 
 :call
   `
@@ -57,14 +70,12 @@
 :decr `dec qword [r14-8]` ;
 :incr `inc qword [r14-8]` ;
 
-:swap
-  `
-  mov rax,[r14-8]
-  mov rbx,[r14-16]
-  mov [r14-16], rax
-  mov [r14-8], rbx
-  `
-  ;
+:swap { $a $b }
+  $a.set
+  $b.set
+  $a.get
+  $b.get
+;
 
 :pop ` sub r14, 8 ` ;
 
@@ -77,4 +88,3 @@
   mov [r14-8],rax ; copy the register back to the top of the stack
   `
 ;
-

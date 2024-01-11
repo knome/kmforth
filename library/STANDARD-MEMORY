@@ -50,10 +50,9 @@
   # 
   :memory/poke-@name
     `
-    sub r14,8     ; get value
-    mov rbx,[r14]
-    sub r14,8     ; get destination address
-    mov rax,[r14]
+    mov rbx,[r14-8]     ; get value
+    mov rax,[r14-16]    ; get destination address
+    sub r14,16
     mov [rax],@writeSource@
     `
   ;

@@ -8,11 +8,11 @@
   $.jump
 ;
 
-# [: todo cond
+# [: cond todo
 # 
 :while { $test $todo $retry $condRet }
-  $test.set    # pop stack into test local
   $todo.set    # pop stack into todo local
+  $test.set    # pop stack into test local
   
   $retry.here  # push address following command into local
   
@@ -71,4 +71,10 @@
   # otherwise call the default else branch
   # 
   $onElse.get call
+;
+
+# [: cond todo 
+# [:
+:when
+  $.callIf
 ;

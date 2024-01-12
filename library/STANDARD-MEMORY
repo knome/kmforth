@@ -67,6 +67,14 @@
   
   0 # [: dst src len thus
   
+  [ # checks if remaining has any left
+    { $thus $len }
+    
+    $thus.set $len.set    # grab the two values
+    $len.get $thus.get    # and replace them on the stack
+    
+    $thus.get $len.get <  # then push the comparison
+  ]
   [
     { $dst $src $len $thus }
     
@@ -83,14 +91,6 @@
     $src.get
     $len.get
     $thus.get 1 +
-  ]
-  [ # checks if remaining has any left
-    { $thus $len }
-    
-    $thus.set $len.set    # grab the two values
-    $len.get $thus.get    # and replace them on the stack
-    
-    $thus.get $len.get <  # then push the comparison
   ]
   while
   

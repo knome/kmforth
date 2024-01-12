@@ -1,7 +1,7 @@
 
 @ "STANDARD" ;
 
-:printno
+:-printno
   [
                               # [: value buffer=(number-buffer (tmp, on callstack))
     string/unsigned-to-ascii  # [: <string-pointer>
@@ -10,8 +10,8 @@
 ;
 
 :main
-  1  printno
-  42 printno
-  0  printno
-  -1 printno
+  1  -printno
+  42 -printno
+  0  -printno
+  -1 -printno
 ;

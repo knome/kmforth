@@ -24,6 +24,16 @@
   `
 ;
 
+:stack/depth
+  `
+  mov rax, r15          ; copy current callstack location
+  sub rax, [callstack]  ; fetch bottom of callstack (saved during startup)
+  shr rax, 3            ; divide by callstack entry size (8)
+  mov qword [r14], rax  ; stuff it on the datastack
+  add r14,8             ; bump the datastack height
+  `
+;
+
 :call
   `
   ; instead of pushing our return, tail call across

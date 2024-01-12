@@ -112,10 +112,25 @@
   syscall/STDOUT -write-all
 ;
 
-:print
-       syscall/STDOUT -write-all dup $.leaveIf pop
-  "\n" syscall/STDOUT -write-all
-;  
+# print a string or die on failure
+# 
+# [: "string"
+# [: -
+# 
+:print "\n" 2 write-strings [ "PRINTERROR" log 1 exit ] $.callIf ;
+
+# print a number or die on failure
+# 
+# [: number
+# [: -
+# 
+:printno
+  [
+                              # [: value buffer=(number-buffer (tmp, on callstack))
+    string/unsigned-to-ascii  # [: <string-pointer>
+    print                     # [:
+  ] strings/number-buffer.size stack/call-with-stack-buffer
+;
 
 # [: "string" fd
 # [: err

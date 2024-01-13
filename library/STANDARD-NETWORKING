@@ -1,22 +1,55 @@
 
-% network/dword-bits (@rc @st)
-  @ @rc @st (
-    (a type/u8)
-    (b type/u8)
-    (c type/u8)
-    (d type/u8)
-  );
+# an actual bigendian system will require us to fire at an offset into the qword to hit the right spot
+# probably move this into a system module and make it architecture dependent when we can
+# maybe all this should be in memory/ instead of network/
+# 
+% network/with-if-local-endianness-is-little ( @rc @st )
+  @ @rc @st 1 ;
 ;
-@ struct/define network/dword-bits ;
 
-:qword-little-to-big { $in $out }
-  $in.set
-  0 $out.set
-  
-  $out.addr $in.addr network/dword-bits//a.get network/dword-bits//d.set
-  $out.addr $in.addr network/dword-bits//b.get network/dword-bits//c.set
-  $out.addr $in.addr network/dword-bits//c.get network/dword-bits//b.set
-  $out.addr $in.addr network/dword-bits//d.get network/dword-bits//a.set
-  
-  $out.get
+% network/-foreach-endian-size (@entry.each)
+  @ network/with-if-local-endianness-is-little network/-for-endian-size @entry ;
 ;
+
+% network/-for-endian-size ((@sigil @mnemonic) @localIsLittle)
+  :network/local-to-network-@mnemonic
+    @(
+      (@localIsLittle)
+      (@little.expandIf)
+      ` bswap @mnemonic@ [r14-8] `
+    )
+    @(
+      (@localIsLittle)
+      (@big.expandIfNot)
+      # this space intentionally left blank
+    )
+  ;
+  
+  :network/network-to-local-@mnemonic
+    @(
+      (@localIsLittle)
+      (@little.expandIf)
+      ` bswap @mnemonic@ [r14-8] `
+    )
+    @(
+      (@localIsLittle)
+      (@big.expandIfNot)
+      # this space intentionally left blank
+    )
+  ;
+  
+  :network/little-to-bigendian-@mnemonic
+      ` bswap @mnemonic@ [r14-8] `
+  ;
+  
+  :network/big-to-littleendian-@mnemonic
+      ` bswap @mnemonic@ [r14-8] `
+  ;
+;
+
+@ network/-foreach-endian-size (
+    (q qword)
+    (d dword)
+    (w word)
+    # no point in swapping a byte
+);

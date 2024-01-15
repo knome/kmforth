@@ -3379,6 +3379,16 @@ def generate_code(
                         code.append( '    sub r14, 8\n' )
                         code.append( '    mov rax, [r14]\n' )
                         code.append( '    mov qword [r15-8*%d], rax\n' % (slotno+1) )
+                    elif memberfn == 'copy':
+                        if functions[fn].body().localfn_size( localName ) != 8:
+                            raise Exception(
+                                'you can only .copy to locals of size 8. other sizes only offer .addr, found %s' % (
+                                    repr( command ) ,
+                                )
+                            )
+                        code.append( '    ; copy datastack to local (%s)\n' % ( repr( localName ) ) )
+                        code.append( '    mov rax, [14-8]\n' )
+                        code.append( '    mov qword [r15-8*%d], rax\n' % (slotno+1) )
                     elif memberfn == 'here':
                         if functions[fn].body().localfn_size( localName ) != 8:
                             raise Exception(

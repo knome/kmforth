@@ -14,6 +14,7 @@ import binascii
 
 G_SHOW_EXPANSIONS = False
 G_EXPANSION_ID = [0]
+G_SHOW_OPTIMIZATIONS = False
 
 NUMBERS  = set( '0123456789' )
 LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz' )
@@ -40,6 +41,23 @@ def main():
         dest='showExpansions' ,
         default=False         ,
     )
+    parser.add_option(
+        '--optimize'        ,
+        action='store_true' ,
+        dest='optimize'     ,
+        default=False       ,
+    )
+    parser.add_option(
+        '--show-optimizations'   ,
+        action='store_true'      ,
+        dest='showOptimizations' ,
+        default=False            ,
+    )
+    parser.add_option(
+        '--startname'     ,
+        dest='startname'  ,
+        default=':_start' ,
+    )
     options, free = parser.parse_args()
     if len( free ) != 1:
         raise Exception( 'usage: kmforth <path/to/file/to/compile>' )
@@ -47,9 +65,18 @@ def main():
     if free[0] == "":
         raise Exception( 'empty target path' )
     
+    if options.startname == "":
+        raise Exception( 'must specify startname' )
+    
+    startname = mangle( options.startname )
+    
     if options.showExpansions:
         global G_SHOW_EXPANSIONS
         G_SHOW_EXPANSIONS = True
+    
+    if options.showOptimizations:
+        global G_SHOW_OPTIMIZATIONS
+        G_SHOW_OPTIMIZATIONS = True
     
     target = os.path.normpath( os.path.join( os.getcwd(), free[0] ) )
     
@@ -156,11 +183,17 @@ def main():
                 for subfn in fn.body().subfns():
                     fns.append( subfn )
     
-    usedFns = analyze_functions( allFns )
+    callgraph, usedFns = analyze_functions( allFns, startname = startname )
+    
+    if options.optimize:
+        outFns = optimize( allFns, usedFns, callgraph, startname )
+    else:
+        outFns = allFns
     
     outcode = generate_code(
-        functions     = allFns  ,
-        usedFunctions = usedFns ,
+        functions     = outFns    ,
+        usedFunctions = usedFns   ,
+        startname     = startname ,
     )
     
     print( outcode )
@@ -766,16 +799,16 @@ def parse_body(
         elif pt.kind() == 'word':
             tokens.take()
             commands.append( Token(
-                location = pt.location()                  ,
-                kind     = 'word'                         ,
-                value    = 'kmfn_' + mangle( pt.value() ) ,
+                location = pt.location()              ,
+                kind     = 'word'                     ,
+                value    = mangle( ':' + pt.value() ) ,
             ))
         elif pt.kind() == 'fnref':
             tokens.take()
             commands.append( Token(
-                location = pt.location()                  ,
-                kind     = 'fnref'                        ,
-                value    = 'kmfn_' + mangle( pt.value() ) ,
+                location = pt.location()              ,
+                kind     = 'fnref'                    ,
+                value    = mangle( ':' + pt.value() ) ,
             ))
         elif pt.kind() in [ 'localfn', 'string', 'integer', 'code' ]:
             tokens.take()
@@ -860,13 +893,18 @@ def mangle( name ):
             for byte in cc.encode( 'utf-8' ):
                 bits.append( '_' + hex(byte)[2:] + '_' )
     
-    final = ''.join( bits )
+    final = 'kmfn_' + ''.join( bits )
     
     return final
 
 def unmangle( name ):
     bits = []
     ss   = Source( name[len('kmfb_'):] )
+    
+    if name.startswith( 'kmlambda'):
+        # lambdas aren't mangled and it is useful to
+        # call this were lambdas and functions are combined
+        return name
     
     while ss.peek() != None:
         vv = ss.take()
@@ -879,6 +917,14 @@ def unmangle( name ):
     return binascii.a2b_hex( ''.join(bits) ).decode( 'utf-8' )
 
 class NamedFunction:
+    
+    def rewriting_commands( self, new ):
+        return NamedFunction(
+            location = self._location                       ,
+            name     = self._name                           ,
+            body     = self._body.rewriting_commands( new ) ,
+        )
+    
     def __init__(
         self     ,
         location ,
@@ -910,24 +956,35 @@ class NamedFunction:
     
     def name( self ):
         return Token(
-            location = self._name.location()                ,
-            kind   = 'word'                                 ,
-            value  = 'kmfn_' + mangle( self._name.value() ) ,
+            location = self._name.location()            ,
+            kind   = 'word'                             ,
+            value  = mangle( ':' + self._name.value() ) ,
         )
 
 class LambdaFunction:
     
+    def rewriting_commands( self, new ):
+        return LambdaFunction(
+            location = self._location                       ,
+            body     = self._body.rewriting_commands( new ) ,
+            _name    = self._name                           ,
+        )
+    
     NN = 0
     
     def __init__(
-        self     ,
-        location ,
-        body     ,
+        self         ,
+        location     ,
+        body         ,
+        _name = None ,
     ):
         self._location = location
         self._body     = body
         
-        self._name     = self._get_name()
+        if _name != None:
+            self._name = _name
+        else:
+            self._name = self._get_name()
         return
     
     @classmethod
@@ -955,6 +1012,14 @@ class LambdaFunction:
 
 class Body:
     
+    def rewriting_commands( self, new ):
+        return Body(
+            location = self._location ,
+            commands = new            ,
+            localfns = self._localfns ,
+            subfns   = self._subfns   ,
+        )
+    
     def __init__(
         self     ,
         location ,
@@ -966,7 +1031,8 @@ class Body:
         self._commands = commands
         self._subfns   = subfns
         
-        self._localfns      = []
+        self._localfns      = localfns
+        self._localfnNames  = []
         self._localfnSizes  = {}
         self._localfnSlotNo = {}
         
@@ -976,7 +1042,7 @@ class Body:
             if size % 8 != 0:
                 raise Exception( 'implementation error: localfn size not divisible by 8: %s' % repr( (name,size) ) )
             
-            self._localfns.append(name)
+            self._localfnNames.append(name)
             self._localfnSizes[ name ] = size
             self._localfnSlotNo[ name ] = slotno
             slotno += size / 8
@@ -995,8 +1061,8 @@ class Body:
     def commands( self ):
         return self._commands
     
-    def localfns( self ):
-        return self._localfns
+    def localfns_names( self ):
+        return self._localfnNames
     
     def localfns_total_size( self ):
         return sum( self._localfnSizes.values() )
@@ -2863,7 +2929,7 @@ def extract_local_macro_arguments(
 # TODO: use a tree starting from _start so we only get what we really actually need
 # this includes anything that's in any function ( because we just modified a scanner )
 # 
-def analyze_functions( allFns ):
+def analyze_functions( allFns, startname ):
     
     callgraph = {}
     
@@ -2907,15 +2973,15 @@ def analyze_functions( allFns ):
     # by default, it's in the library/STANDARD
     # and calls :main after initialization
     # 
-    if 'kmfn__5f_start' not in allFns:
-        raise Exception( 'no :_start function ( forget to @ "STANDARD" ; ? )' )
+    if startname not in allFns:
+        raise Exception( 'no %s function ( forget to @ "STANDARD" ; ? )' % repr( unmangle( startname ) ) )
     
     # walk from :_start down and figure out what
     # functions are actually used in the current
     # program
     # 
     usedFns = set()
-    pending = [ 'kmfn__5f_start' ]
+    pending = [ startname ]
     while pending:
         pp = pending.pop()
         if pp in usedFns:
@@ -2925,7 +2991,7 @@ def analyze_functions( allFns ):
             for callee in callgraph[ pp ]:
                 pending.append( callee )
     
-    return usedFns
+    return callgraph, usedFns
 
 #####
 
@@ -2942,6 +3008,187 @@ class StringCoalescer:
     def remember( self, ss, label ):
         self._string2label[ ss ] = label
 
+
+#####
+
+# possible opts
+# 
+# constant propagation:
+#   if a function just produces a constant, replace it with that constant in the caller
+# function inlining:
+#   if a function doesn't recurse
+#   and is under some threshold for number of commands used in the callee
+#   inline its locals and commands into the calling function
+# branch pruning
+#   if a conditional call would work against a constant, replace it with the call or a pop
+# unused local/constant pruning
+#   if a local or constant isn't used, don't bother to set it
+# call pruning
+#   if a function is side effect free and its value isn't used, don't bother to call it
+# return elision:
+#   if a function does not have any locals
+#   tail call to the last function called in that function
+#   flattens the return stack avoid unnecessary return chains
+# assembly register and constant alternatives
+#   a syntax for annotating assembly segments with short code segments
+#   that can be used for replacing it with alternate code or constants
+#   where appropriate
+
+# immediately triggering the other function to run is dumb
+# it makes writing simple loops a pain
+# it should still wait for the next, just with a value set to return
+# otherwise it makes writing logic for it unnecessarily hairy
+# 
+class NotStupidCoroutine:
+    def __init__(
+        self   ,
+        actual ,
+    ):
+        self._actual  = iter(actual)
+        self._pending = ()
+    
+    def __iter__( self ):
+        return self
+    
+    def __next__( self ):
+        if self._pending:
+            p = self._pending[0]
+            self._pending = None
+            return self._actual.send(p)
+        else:
+            return next(self._actual)
+    
+    def prepare_send( self, value ):
+        if self._pending:
+            raise Exception( 'cannot stage yield-expression value when already set' )
+        else:
+            self._pending = (value,)
+
+def optimize( allfns, used, callgraph, startname ):
+    notes = {}
+    opted = {}
+    
+    callees = callgraph
+    callers = {}
+    for (k,vv) in callees.items():
+        for v in vv:
+            if v not in callers:
+                callers[v] = set()
+            callers[v].add(k)
+    
+    pending = [(startname, NotStupidCoroutine(optimize_fn(
+        notes     = notes             ,
+        callees   = callees           ,
+        callers   = callers           ,
+        opted     = opted             ,
+        allfns    = allfns            ,
+        name      = startname         ,
+        fn        = allfns[startname] ,
+    )))]
+    
+    pendingNames = { startname }
+    
+    while pending:
+        name, optgn = pending[-1]
+        needed = next( optgn, None )
+        if needed == None:
+            pendingNames.remove(pending[-1][0])
+            pending.pop()
+            if pending:
+                pending[-1][1].prepare_send(False)
+        elif needed in opted:
+            pending[-1][1].prepare_send(False)
+        elif needed in pendingNames:
+            pending[-1][1].prepare_send(True)
+        else:
+            pending.append( (needed,NotStupidCoroutine(optimize_fn(
+                notes     = notes          ,
+                callees   = callees        ,
+                callers   = callers        ,
+                opted     = opted          ,
+                allfns    = allfns         ,
+                name      = needed         ,
+                fn        = allfns[needed] ,
+            ))))
+            pendingNames.add( needed )
+    
+    return opted
+
+def optimize_fn( notes, callees, callers, opted, allfns, name, fn ):
+    
+    recursive = set()
+    
+    for command in fn.body().commands():
+        
+        if command.kind() == 'word':
+            if (yield command.value()):
+                recursive.add( command.value() )
+        elif command.kind() == 'subfn':
+            if (yield command.value()):
+                recursive.add( command.value() )
+        elif command.kind() == 'localfn':
+            pass
+        elif command.kind() == 'integer':
+            pass
+        elif command.kind() == 'code':
+            pass
+        elif command.kind() == 'string':
+            pass
+        else:
+            raise Exception( 'unknown kind: %s' % repr( command.kind() ) )
+    
+    changed   = False
+    updatedfn = fn
+    while True:
+        for optimizefn in [
+            optimize_constants ,
+        ]:
+            changed, updatedfn = optimizefn(
+                notes     = notes     ,
+                recursive = recursive ,
+                name      = name      ,
+                targetfn  = updatedfn ,
+            )
+        
+        if changed:
+            continue
+        else:
+            break
+    
+    opted[ name ] = updatedfn
+    
+    yield None
+
+def optimize_constants( notes, recursive, name, targetfn ):
+    rewritten = []
+    changed   = False
+    for command in targetfn.body().commands():
+        if command.kind() == 'word':
+            if command.value() in notes and 'constant' in notes[ command.value() ]:
+                if G_SHOW_OPTIMIZATIONS:
+                    log( '[opt] replacing call in %s to %s with constant %s' % (
+                        repr( unmangle( name ) )                     ,
+                        repr( unmangle( command.value() ) )          ,
+                        repr( notes[ command.value() ]['constant'].simple() ) ,
+                    ))
+                
+                changed = True
+                rewritten.append( notes[ command.value() ]['constant'] )
+            else:
+                rewritten.append( command )
+        else:
+            rewritten.append( command )
+    
+    if len( rewritten ) == 1 and rewritten[0].kind() in ['integer', 'string']:
+        if name not in notes:
+            notes[ name ] = {}
+        notes[ name ]['constant'] = rewritten[0]
+    
+    if changed:
+        return True, targetfn.rewriting_commands( rewritten )
+    else:
+        return False, targetfn
+
 # returnindex + 1
 # newframe = stack + sizeof( returnframe = 16) * returnindex
 # newframe[0] = fn_0
@@ -2951,6 +3198,7 @@ class StringCoalescer:
 def generate_code(
     functions     ,
     usedFunctions ,
+    startname     ,
 ):
     stringCoalescer = StringCoalescer()
     
@@ -2975,7 +3223,7 @@ def generate_code(
     
     code.append( 'global _start\n')
     code.append( '_start:\n' )
-    code.append( '    jmp kmfn__5f_start\n' ) # name mangling, _5F_ = _
+    code.append( '    jmp %s\n' % startname )
     code.append( '\n')
     
     nn = 0

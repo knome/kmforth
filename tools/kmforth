@@ -3141,11 +3141,13 @@ def optimize_fn( notes, callees, callers, opted, allfns, name, fn ):
     updatedfn = fn
     while True:
         for optimizefn in [
-            optimize_constants ,
+            optimize_constants                                                                                                 ,
+            optimize_inline_nonrecursive_functions_of_less_than_ten_commands_lacking_locals_and_not_touching_the_control_stack ,
         ]:
             changed, updatedfn = optimizefn(
                 notes     = notes     ,
                 recursive = recursive ,
+                opted     = opted     ,
                 name      = name      ,
                 targetfn  = updatedfn ,
             )
@@ -3159,7 +3161,7 @@ def optimize_fn( notes, callees, callers, opted, allfns, name, fn ):
     
     yield None
 
-def optimize_constants( notes, recursive, name, targetfn ):
+def optimize_constants( notes, recursive, opted, name, targetfn ):
     rewritten = []
     changed   = False
     for command in targetfn.body().commands():
@@ -3183,6 +3185,55 @@ def optimize_constants( notes, recursive, name, targetfn ):
         if name not in notes:
             notes[ name ] = {}
         notes[ name ]['constant'] = rewritten[0]
+    
+    if changed:
+        return True, targetfn.rewriting_commands( rewritten )
+    else:
+        return False, targetfn
+
+def optimize_inline_nonrecursive_functions_of_less_than_ten_commands_lacking_locals_and_not_touching_the_control_stack(
+    notes     ,
+    recursive ,
+    opted     ,
+    name      ,
+    targetfn  ,
+):
+    rewritten = []
+    changed   = False
+    for command in targetfn.body().commands():
+        if command.kind() == 'word':
+            vv = command.value()
+            isRecursive = vv in recursive
+            # count commands and inline assembly bits
+            isLong      = (
+                vv in opted
+                and
+                ( 
+                    len( opted[vv].body().commands() )
+                    +
+                    sum(
+                        len(e.value().split())
+                        for e in opted[vv].body().commands()
+                        if e.kind() == 'code'
+                    )
+                ) >= 10
+            )
+            hasLocals = vv in opted and len( opted[vv].body().localfns_names() ) > 0
+            hasCodeTouchingTheCallStack = (
+                vv in opted and any(
+                    (e.kind() == 'code' and 'r15' in e.value())
+                    for e in opted[vv].body().commands() 
+                )
+            )
+            if isRecursive or isLong or hasLocals or hasCodeTouchingTheCallStack:
+                # not optimizing it right now
+                rewritten.append( command )
+            else:
+                if G_SHOW_OPTIMIZATIONS:
+                    log( '[opt] inlining call to %s in %s' % ( repr( unmangle( command.value() ) ), repr( unmangle( name ) ) ) )
+                # optimizing it!
+                for subcommand in opted[vv].body().commands():
+                    rewritten.append( subcommand )
     
     if changed:
         return True, targetfn.rewriting_commands( rewritten )

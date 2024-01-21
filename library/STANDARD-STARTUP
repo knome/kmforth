@@ -1,5 +1,6 @@
 
 :_start
+  $.noopt
   `
   ;;; setup the data-stack
   

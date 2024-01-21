@@ -24,7 +24,7 @@
   `
 ;
 
-:stack/depth
+:stack/callstack-depth
   `
   mov rax, r15          ; copy current callstack location
   sub rax, [callstack]  ; fetch bottom of callstack (saved during startup)
@@ -34,16 +34,18 @@
   `
 ;
 
+:stack/datastack-depth
+  `
+  mov rax, r14          ; copy current callstack location
+  sub rax, [datastack]  ; fetch bottom of callstack (saved during startup)
+  shr rax, 3            ; divide by callstack entry size (8)
+  mov qword [r14], rax  ; stuff it on the datastack
+  add r14,8             ; bump the datastack height
+  `
+;
+
 :call
-  `
-  ; instead of pushing our return, tail call across
-  ; and let the called function pop back there
-  ;   mov qword [r15], .back
-  ;   add r15, 8
-  sub r14, 8
-  jmp [r14]
-  ; .back:
-  `
+  $.call
   ;
 
 # [: todo size

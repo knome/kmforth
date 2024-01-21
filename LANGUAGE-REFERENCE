@@ -154,8 +154,8 @@
 # * count         : expand once with the number of entries in the macrolist
 # * first         : expand once with the first entry in a macrolist
 # * rest          : expand once with a macrolist containing all but the first entry of a macrolist
-# * toZero        : expand once for every value down including zero
-# * toOne         : expand once for every value down except stop at one instead of zero
+# * toZero        : expand once for echo value from (given-1) through zero ( 3 --> 2 1 0 )
+# * toOne         : expand once for every value from (given) through one ( 3 --> 3 2 1 )
 # * decr          : expand once with one less than the argument
 # * incr          : expand once with one more than the argument
 # * expandIf      : only expand if the value is truthy (not 0, "", or ())
@@ -167,5 +167,5 @@
 # * globalno      : expands to a unique number, this parameter does not consume an argument
 
 # you can expand a local macro in the arguments, even in a macrolist
-# this is the same as @( ((10 9 8 7 6 5 4 3 2 1 0 10 9 8 7 6 5 4 3 2 1 0)) (@v.each) "@v@" write ) ;
+# this is the same as @( ((9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0)) (@v.each) "@v@" write ) ;
 :main @( ( ( @((10)(@t.toZero)@t) @((10)(@t.toZero)@t) ) ) (@v.each) "@v@" write ) ;

@@ -10,7 +10,7 @@
 
 # [: value number-buffer
 # [: <pointer-to-start-of-string-in-buffer>
-:string/unsigned-to-ascii { $buffer $offset $loop }
+:strings/unsigned-to-ascii { $buffer $offset $loop }
   $buffer.set                                 # [: value
   
   strings/number-buffer//bytes.last-index     # [: value <last-index>
@@ -46,7 +46,7 @@
   strings/number-buffer//bytes.nth.addr       # [: <addr-of-start-of-string>
 ;
 
-:string/length
+:strings/length
   `
   sub r14, 8             ; pop the pointer to the string
   mov rax, [r14]         ; 

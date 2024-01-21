@@ -3,36 +3,76 @@
 
 @ "STANDARD" ;
 
-:main { $buffer $fd $addr $1111.cool}
+# calculate the nth fibonacci number
+# 
+# [: n
+# [: fib(n)
+:fibonacci
+  dup 2 <   # nth (nth<2)
+  $.leaveIf # <> nth | nth   # we return the given value on the stack by leaving it
   
-  syscall/socket/pf-inet
-  syscall/socket/sock-stream
-  syscall/socket/ipproto-tcp
-  syscall/socket
-  "failed to create socket" dieOnError
-  
-  $fd.set
-  
-  0x7f000001 qword-little-to-big
-  $addr.set
-  
-  syscall/bind/sockaddr-in4.size memory/map-region
-  "failed to create address buffer" dieOnError
-  
-  dup syscall/bind/af-inet syscall/bind/sockaddr-in4//sin-family.set
-  dup 9001                 syscall/bind/sockaddr-in4//sin-port.set
-  dup $addr.get            syscall/bind/sockaddr-in4//sin-addr.set
-  
-  $buffer.set
-  
-  $fd.get
-  $buffer.get
-  syscall/bind/sockaddr-in4.size
-  syscall/bind
-  "failed to bind" dieOnError
-  
-  "wow" write
-  
-  [] loop
-  
+  dup 1 -   # nth (nth-1)
+  fibonacci # nth f(nth-1)
+  swap      # f(nth-1) nth
+  2 -       # f(nth-1) (nth-2)
+  fibonacci # f(nth-1) f(nth-2)
+  +         # (f(nth-1)+f(nth)-2)
 ;
+
+:main { $loop $hello-world }
+  "start" print
+  0          # [: i
+  $loop.here
+  dup        # [: i i
+  fibonacci  # [: i fib(i)
+  printno    # [: i 
+  1 +        # [: (i+1)
+  dup 36 <   # [: (i+1) ((i+1)<36)
+  $loop.get  # [: (i+1) ((i+1)<36) <loop>
+  $.jumpIf   # [: (i+1)
+  pop
+  "exit" print
+;
+
+# :main
+#   "hello"
+#   ", "
+#   "world"
+#   "!"
+#   "\n"
+#   5 write-strings
+# ;
+
+# :main { $buffer $fd $addr $1111.cool}
+#   
+#   syscall/socket/pf-inet
+#   syscall/socket/sock-stream
+#   syscall/socket/ipproto-tcp
+#   syscall/socket
+#   "failed to create socket" dieOnError
+#   
+#   $fd.set
+#   
+#   0x7f000001 qword-little-to-big
+#   $addr.set
+#   
+#   syscall/bind/sockaddr-in4.size memory/map-region
+#   "failed to create address buffer" dieOnError
+#   
+#   dup syscall/bind/af-inet syscall/bind/sockaddr-in4//sin-family.set
+#   dup 9001                 syscall/bind/sockaddr-in4//sin-port.set
+#   dup $addr.get            syscall/bind/sockaddr-in4//sin-addr.set
+#   
+#   $buffer.set
+#   
+#   $fd.get
+#   $buffer.get
+#   syscall/bind/sockaddr-in4.size
+#   syscall/bind
+#   "failed to bind" dieOnError
+#   
+#   "wow" write
+#   
+#   [] loop
+#   
+# ;

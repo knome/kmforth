@@ -127,7 +127,7 @@
 :printno
   [
                               # [: value buffer=(number-buffer (tmp, on callstack))
-    string/unsigned-to-ascii  # [: <string-pointer>
+    strings/unsigned-to-ascii # [: <string-pointer>
     print                     # [:
   ] strings/number-buffer.size stack/call-with-stack-buffer
 ;
@@ -137,7 +137,7 @@
 # 
 :-write-all { $fd $len $string  $thus $retry }
   $fd.set
-  dup string/length        # [: string string-length
+  dup strings/length       # [: string string-length
   $len.set                 # [: string
   $string.set              # [:
   0 $thus.set              # [:
@@ -233,7 +233,7 @@
      $s.get                           ###[: ss? cur s
      
      syscall/iovec//base.set          ###[: ss? 
-     $cur.get $s.get string/length    ###[: ss? cur <s-length>
+     $cur.get $s.get strings/length   ###[: ss? cur <s-length>
      dup $total.get + $total.set      ###[: ss? cur <s-length>
      syscall/iovec//len.set           ###[: ss?
      

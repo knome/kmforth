@@ -15,6 +15,9 @@ import binascii
 G_SHOW_EXPANSIONS = False
 G_EXPANSION_ID = [0]
 G_SHOW_OPTIMIZATIONS = False
+G_INLINE_THRESHOLD = 10
+G_INLINE_ONLY = None
+G_INLINE_EXCEPT = None
 
 NUMBERS  = set( '0123456789' )
 LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz' )
@@ -54,6 +57,14 @@ def main():
         default=False            ,
     )
     parser.add_option(
+        '--inline-only',
+        dest='inlineOnly',
+    )
+    parser.add_option(
+        '--inline-except',
+        dest='inlineExcept',
+    )
+    parser.add_option(
         '--startname'     ,
         dest='startname'  ,
         default=':_start' ,
@@ -64,6 +75,8 @@ def main():
     
     if free[0] == "":
         raise Exception( 'empty target path' )
+    elif free[0] == "-":
+        free[0] = "/dev/stdin"
     
     if options.startname == "":
         raise Exception( 'must specify startname' )
@@ -77,6 +90,20 @@ def main():
     if options.showOptimizations:
         global G_SHOW_OPTIMIZATIONS
         G_SHOW_OPTIMIZATIONS = True
+        
+    if options.inlineOnly:
+        global G_INLINE_ONLY
+        pattern = '.*(' + options.inlineOnly + ').*'
+        if G_SHOW_OPTIMIZATIONS:
+            log('[options] --inline-only pattern is %s' % repr( pattern ))
+        G_INLINE_ONLY = re.compile( pattern )
+    
+    if options.inlineExcept:
+        global G_INLINE_EXCEPT
+        pattern = '.*(' + options.inlineExcept + ').*'
+        if G_SHOW_OPTIMIZATIONS:
+            log('[options] --inline-except pattern is %s' % repr( pattern ))
+        G_INLINE_EXCEPT = re.compile( pattern )
     
     target = os.path.normpath( os.path.join( os.getcwd(), free[0] ) )
     
@@ -187,6 +214,8 @@ def main():
     
     if options.optimize:
         outFns = optimize( allFns, usedFns, callgraph, startname )
+        # drop functions we optimized out
+        callgraph, usedFns = analyze_functions( outFns, startname = startname )
     else:
         outFns = allFns
     
@@ -598,7 +627,7 @@ def extract_word( initial, characters ):
         if not pc:
             break
         cc = pc.character()
-        if cc.lower() in WORDBITS:
+        if cc.lower() in WORDBITS or cc == '$':
             characters.take()
             bits.append( cc )
         else:
@@ -621,11 +650,18 @@ def extract_word( initial, characters ):
         kind  = 'word'
         value = ''.join(bits)
     
-    return Token(
+    token = Token(
         location = initial.location() ,
         kind     = kind               ,
         value    = value              ,
     )
+    
+    if value and '$' in value[1:]:
+        raise Exception(
+            '"$" cannot be used inside a word, just at the start of a local, found: %s' % repr( token )
+        )
+    
+    return token
 
 def extract_macrovar( initial, characters ):
     bits = []
@@ -854,7 +890,7 @@ def parse_optional_locals( tokens ):
                 fore, aft = vv.split('.',1)
                 if not (fore[1:] and fore[1:].isdigit()):
                     raise Exception(
-                        'localfn size designation must be a number divisible by 8 ($<size>.<name>), found %s' % pt
+                        'localfn size designation must be a number ($<size>.<name>), found %s' % pt
                     )
                 else:
                     vv = '$' + aft
@@ -925,6 +961,13 @@ class NamedFunction:
             body     = self._body.rewriting_commands( new ) ,
         )
     
+    def rewriting_localfns( self, new ):
+        return NamedFunction(
+            location = self._location                       ,
+            name     = self._name                           ,
+            body     = self._body.rewriting_localfns( new ) ,
+        )
+    
     def __init__(
         self     ,
         location ,
@@ -967,6 +1010,13 @@ class LambdaFunction:
         return LambdaFunction(
             location = self._location                       ,
             body     = self._body.rewriting_commands( new ) ,
+            _name    = self._name                           ,
+        )
+    
+    def rewriting_localfns( self, new ):
+        return LambdaFunction(
+            location = self._location                       ,
+            body     = self._body.rewriting_localfns( new ) ,
             _name    = self._name                           ,
         )
     
@@ -1020,6 +1070,14 @@ class Body:
             subfns   = self._subfns   ,
         )
     
+    def rewriting_localfns( self, new ):
+        return Body(
+            location = self._location ,
+            commands = self._commands ,
+            localfns = new            ,
+            subfns   = self._subfns   ,
+        )
+    
     def __init__(
         self     ,
         location ,
@@ -1045,7 +1103,7 @@ class Body:
             self._localfnNames.append(name)
             self._localfnSizes[ name ] = size
             self._localfnSlotNo[ name ] = slotno
-            slotno += size / 8
+            slotno += size // 8
         
         return
     
@@ -1060,6 +1118,9 @@ class Body:
     
     def commands( self ):
         return self._commands
+    
+    def localfns( self ):
+        return self._localfns
     
     def localfns_names( self ):
         return self._localfnNames
@@ -2720,7 +2781,7 @@ def expand_bitstream(
                     tokens       = Source( bit.bits() ) ,
                 )),
             )
-        elif bit.kind() in [ ';', '{', '}', '[', ']', '(', ')', 'localfn', 'word', 'integer', 'string', 'code' ]:
+        elif bit.kind() in [ ';', '{', '}', '[', ']', '(', ')', 'localfn', 'word', 'integer', 'string', 'code', 'fnref' ]:
             yield bit
         else:
             raise Exception( 'unknown bit in macro expansion bitstream: %s' % repr( bit ) )
@@ -3068,6 +3129,8 @@ def optimize( allfns, used, callgraph, startname ):
     notes = {}
     opted = {}
     
+    recursive = set()
+    
     callees = callgraph
     callers = {}
     for (k,vv) in callees.items():
@@ -3082,6 +3145,7 @@ def optimize( allfns, used, callgraph, startname ):
         callers   = callers           ,
         opted     = opted             ,
         allfns    = allfns            ,
+        recursive = recursive         ,
         name      = startname         ,
         fn        = allfns[startname] ,
     )))]
@@ -3107,6 +3171,7 @@ def optimize( allfns, used, callgraph, startname ):
                 callers   = callers        ,
                 opted     = opted          ,
                 allfns    = allfns         ,
+                recursive = recursive      ,
                 name      = needed         ,
                 fn        = allfns[needed] ,
             ))))
@@ -3114,9 +3179,7 @@ def optimize( allfns, used, callgraph, startname ):
     
     return opted
 
-def optimize_fn( notes, callees, callers, opted, allfns, name, fn ):
-    
-    recursive = set()
+def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
     
     for command in fn.body().commands():
         
@@ -3134,6 +3197,8 @@ def optimize_fn( notes, callees, callers, opted, allfns, name, fn ):
             pass
         elif command.kind() == 'string':
             pass
+        elif command.kind() == 'fnref':
+            pass
         else:
             raise Exception( 'unknown kind: %s' % repr( command.kind() ) )
     
@@ -3141,8 +3206,10 @@ def optimize_fn( notes, callees, callers, opted, allfns, name, fn ):
     updatedfn = fn
     while True:
         for optimizefn in [
-            optimize_constants                                                                                                 ,
-            optimize_inline_nonrecursive_functions_of_less_than_ten_commands_lacking_locals_and_not_touching_the_control_stack ,
+            # optimize_constants ,
+            # optimize_inline_nonrecursive_functions_of_less_than_threshold_commands_not_touching_the_control_stack ,
+            # disabled: see note below optimize_tailcall_last_function_call_if_no_locals ,
+            optimize_inline_nonrecursive,
         ]:
             changed, updatedfn = optimizefn(
                 notes     = notes     ,
@@ -3173,7 +3240,6 @@ def optimize_constants( notes, recursive, opted, name, targetfn ):
                         repr( unmangle( command.value() ) )          ,
                         repr( notes[ command.value() ]['constant'].simple() ) ,
                     ))
-                
                 changed = True
                 rewritten.append( notes[ command.value() ]['constant'] )
             else:
@@ -3191,7 +3257,7 @@ def optimize_constants( notes, recursive, opted, name, targetfn ):
     else:
         return False, targetfn
 
-def optimize_inline_nonrecursive_functions_of_less_than_ten_commands_lacking_locals_and_not_touching_the_control_stack(
+def optimize_inline_nonrecursive_functions_of_less_than_threshold_commands_not_touching_the_control_stack(
     notes     ,
     recursive ,
     opted     ,
@@ -3205,10 +3271,10 @@ def optimize_inline_nonrecursive_functions_of_less_than_ten_commands_lacking_loc
             vv = command.value()
             isRecursive = vv in recursive
             # count commands and inline assembly bits
-            isLong      = (
+            isLong = (
                 vv in opted
                 and
-                ( 
+                (
                     len( opted[vv].body().commands() )
                     +
                     sum(
@@ -3216,7 +3282,7 @@ def optimize_inline_nonrecursive_functions_of_less_than_ten_commands_lacking_loc
                         for e in opted[vv].body().commands()
                         if e.kind() == 'code'
                     )
-                ) >= 10
+                ) >= G_INLINE_THRESHOLD
             )
             hasLocals = vv in opted and len( opted[vv].body().localfns_names() ) > 0
             hasCodeTouchingTheCallStack = (
@@ -3239,6 +3305,205 @@ def optimize_inline_nonrecursive_functions_of_less_than_ten_commands_lacking_loc
         return True, targetfn.rewriting_commands( rewritten )
     else:
         return False, targetfn
+
+# this actually makes runtime worse, lol
+# probably nukes the return address prediction on the various return jumps
+# 
+def optimize_tailcall_last_function_call_if_no_locals(
+    notes     ,
+    recursive ,
+    opted     ,
+    name      ,
+    targetfn  ,
+):
+    commands = targetfn.body().commands()
+    if len( targetfn.body().localfns_names() ) == 0:
+        if commands:
+            if commands[-1].kind() == 'word':
+                if G_SHOW_OPTIMIZATIONS:
+                    log( '[opt] replacing call to %s at end of local-less function %s with jump' % (
+                        repr( unmangle( commands[-1].value() ) ) ,
+                        repr( unmangle( targetfn.name().value() ) ) ,
+                    ))
+                
+                rewritten = list( commands )[:-1]
+                rewritten.append( Token(
+                    location = commands[-1].location() ,
+                    kind     = 'fnref'                 ,
+                    value    = commands[-1].value()    ,
+                ))
+                rewritten.append( Token(
+                    location = commands[-1].location() ,
+                    kind     = 'localfn'               ,
+                    value    = '$.jump'                ,
+                ))
+                return True, targetfn.rewriting_commands( rewritten )
+    
+    return False, targetfn
+
+INLINED_LEAVEIF = '''
+    ; inlined leaveIf (--> jumpForward)
+    sub r14, 8
+    mov rax, [r14]
+    test rax,rax
+    jnz %(endlabel)s
+'''
+
+def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
+    
+    rewritten = []
+    newlocals = []
+    
+    nextno = 1
+    
+    changed = False
+    
+    for localfn in targetfn.body().localfns():
+        newlocals.append( localfn )
+    
+    for command in targetfn.body().commands():
+        
+        if command.kind() == 'localfn' and command.value() == '$.noopt':
+            if G_SHOW_OPTIMIZATIONS:
+                log('[inline-nonrecursive] refusing to optimize due to $.noopt in %s' % repr( unmangle( name ) ) )
+            changed = False
+            break
+        
+        if command.kind() == 'word':
+            vv = command.value()
+            isRecursive = vv in recursive
+            hasCodeTouchingTheCallStack = (
+                vv in opted and any(
+                    (e.kind() == 'code' and 'r15' in e.value())
+                    for e in opted[vv].body().commands()
+                )
+            )
+            
+            if isRecursive:
+                if G_SHOW_OPTIMIZATIONS:
+                    log('[inline-nonrecursive] refusing to inline %s into %s because it is recursive' % (
+                        repr( unmangle( vv ) ) ,
+                        repr( unmangle( name ) ) ,
+                    ))
+                rewritten.append( command )
+            elif hasCodeTouchingTheCallStack:
+                # no optimization for you
+                if G_SHOW_OPTIMIZATIONS:
+                    log('[inline-nonrecursive] refusing to inline into %s due to use of r15 in assembly in %s' % (
+                        repr( unmangle( name ) ) ,
+                        repr( unmangle( vv ) ) ,
+                    ))
+                rewritten.append( command )
+            else:
+                    
+                if G_INLINE_ONLY:
+                    m = G_INLINE_ONLY.match(unmangle( vv ))
+                    if not m:
+                        if G_SHOW_OPTIMIZATIONS:
+                            log('[inline-nonrecursive] refusing to inline %s, does not match --inline-only regex' % (
+                                repr( unmangle( vv ) ),
+                            ))
+                        rewritten.append( command )
+                        continue
+                
+                if G_INLINE_EXCEPT:
+                    m = G_INLINE_EXCEPT.match(unmangle( vv ))
+                    if m:
+                        if G_SHOW_OPTIMIZATIONS:
+                            log('[inline-nonrecursive] refusing to inline %s, matches --inline-except regex' % (
+                                repr( unmangle( vv ) ),
+                            ))
+                        rewritten.append( command )
+                        continue
+                
+                if any( vv.kind() == 'localfn' and vv.value() == '$.noopt' for vv in opted[vv].body().commands() ):
+                    if G_SHOW_OPTIMIZATIONS:
+                        log('[inline-nonrecursive] refusing to inline in to %s due to "$.noopt" in %s' % (
+                            repr( unmangle( name ) ) ,
+                            repr( unmange( vv ) ) ,
+                        ))
+                    rewritten.append( command )
+                    continue
+                else:
+                    changed = True
+                    
+                    if G_SHOW_OPTIMIZATIONS:
+                        log( '[inline-nonrecursive] inlining call to %s in %s' % (
+                            repr( unmangle( command.value() ) ) ,
+                            repr( unmangle( name ) ) ,
+                        ))
+                    
+                    inlineno = nextno
+                    nextno += 1
+                    
+                    end = '.' + vv + '.' + str(inlineno) + '.inline.end'
+                    includeEndLabel = False
+                    
+                    for sublocal in opted[vv].body().localfns():
+                        newlocals.append( ('$' + vv + '$' + str(inlineno) + sublocal[0], sublocal[1] ) )
+                    
+                    for subcommand in opted[vv].body().commands():
+                        if subcommand.kind() == 'localfn' and subcommand.value()[:2] != '$.':
+                            rewritten.append( Token(
+                                location = subcommand.location()          ,
+                                kind     = 'localfn'                      ,
+                                value    = '$' + vv + '$' + str(inlineno) + subcommand.value() ,
+                            ))
+                        elif subcommand.kind() == 'localfn' and subcommand.value() == '$.leaveIf':
+                            includeEndLabel = True
+                            uniqueno = nextno
+                            nextno += 1
+                            rewritten.append( Token(
+                                location = subcommand.location() ,
+                                kind     = 'code'                ,
+                                value    = INLINED_LEAVEIF % {
+                                    'endlabel' : end,
+                                },
+                            ))
+                        elif subcommand.kind() == 'code':
+                            rewritten.append( Token(
+                                location = subcommand.location() ,
+                                kind     = 'code'                ,
+                                value    = nest_labels( inlineno, vv, subcommand.value() ) ,
+                            ))
+                        else:
+                            rewritten.append( subcommand )
+                    
+                    if includeEndLabel:
+                        rewritten.append( Token(
+                            location = subcommand.location() ,
+                            kind     = 'code'                ,
+                            value    = '; inline end\n' + end + ':'             ,
+                        ))
+        else:
+            rewritten.append( command )
+    
+    if changed:
+        return True, targetfn.rewriting_localfns( newlocals ).rewriting_commands( rewritten )
+    else:
+        return False, targetfn
+
+def nest_labels( uniqueno, prefix, code ):
+    
+    isLocalLabel = re.compile( '(?P<before>.*)(?P<current>[.][A-Za-z_-]*)(?P<after>.*)' )
+    
+    rewritten = []
+    for line in code.split("\n"):
+        m = isLocalLabel.match( line )
+        if m:
+            rewritten.append(
+                m.group('before')
+                +
+                '.' + prefix
+                +
+                '.' + str(uniqueno)
+                + 
+                m.group('current')
+                + m.group('after')
+            )
+        else:
+            rewritten.append( line )
+    return '\n'.join(rewritten)
 
 # returnindex + 1
 # newframe = stack + sizeof( returnframe = 16) * returnindex
@@ -3294,7 +3559,7 @@ def generate_code(
         for command in functions[ fn ].body().commands():
             
             if command.kind() == 'word':
-                rt = fn + '_' + str( nn )
+                rt = '.' + fn + '_' + str( nn )
                 nn = nn + 1
                 
                 code.append( '    ; calling %s\n' % command.value() )
@@ -3330,10 +3595,12 @@ def generate_code(
                 # you have to load the value into a register and use the register command form
                 # 
                 if command.value() > (4294967296 - 1):
+                    code.append( '   ; push integer > 32bit\n' )
                     code.append( '   mov rax, %s\n' % command.value() )
                     code.append( '   mov [r14],rax\n' )
                     code.append( '   add r14,8\n' )
                 else:
+                    code.append( '   ; push integer < 32bit\n' )
                     code.append( '   mov qword [r14], %s\n' % command.value() )
                     code.append( '   add r14, 8\n' )
             
@@ -3385,13 +3652,18 @@ def generate_code(
                         code.append( '    sub r15, 8\n' )
                         code.append( '    jmp [r15]\n' )
                         code.append( '   %s:\n' % label )
-                    elif builtin == '$.leave':
-                        code.append( '    ; leave\n' )
-                        if functions[ fn ].body().localfns_total_size():
-                            code.append( '    ; (popping locals before leaving)\n' )
-                            code.append( '    sub r15, %d\n' % ( functions[fn].body().localfns_total_size() ) )
-                        code.append( '    sub r15, 8\n' )
-                        code.append( '    jmp [r15]\n' )
+                    elif builtin == '$.call':
+                        label = '.km_return_'+  str(nns)
+                        nns += 1
+                        code.append( '    ; $.call\n' )
+                        code.append( '    mov qword [r15], %s\n' % label )
+                        code.append( '    add r15, 8\n' )
+                        code.append( '    sub r14, 8\n' )
+                        code.append( '    jmp [r14]\n' )
+                        code.append( label + ':\n' )
+                    elif builtin == '$.noopt':
+                        # this just prevents inlining the function or inlining into the function
+                        pass
                     else:
                         raise Exception( 'unknown builtin localfn: %s' % repr( command.value() ) )
                 else:
@@ -3402,6 +3674,10 @@ def generate_code(
                     localName, memberfn = commandBits
                     slotno = functions[ fn ].body().get_localfn_slotno( localName )
                     if slotno == None:
+                        log( 'localName', repr( localName ) )
+                        log( 'memberfn', repr( memberfn ) )
+                        log( 'localfns', repr( functions[ fn ].body().localfns() ) )
+                        log( 'slots', repr( functions[ fn ].body()._localfnSlotNo ) )
                         raise Exception(
                             'failed to find local %s in function %s' % (
                                 repr( localName ) ,
@@ -3447,7 +3723,7 @@ def generate_code(
                                     repr( command ) ,
                                 )
                             )
-                        label = 'km_here_' + str(nns)
+                        label = '.km_here_' + str(nns)
                         nns += 1
                         code.append( '    ; set local to label following this command\n' )
                         code.append( '    mov qword [r15-8*%d], %s\n' % ( (slotno+1), label) )

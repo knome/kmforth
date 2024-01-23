@@ -12,9 +12,12 @@ import contextlib
 import re
 import binascii
 
+IMPLEMENTATION = 'kmforth/python'
+
 G_SHOW_EXPANSIONS = False
 G_EXPANSION_ID = [0]
 G_SHOW_OPTIMIZATIONS = False
+G_DEBUG_OPTIMIZATIONS = False
 G_INLINE_THRESHOLD = 10
 G_INLINE_ONLY = None
 G_INLINE_EXCEPT = None
@@ -26,6 +29,11 @@ WORDSTART = LETTERS.union( set('_+-/*<>-%=.@!') )
 WORDBITS  = WORDSTART.union( NUMBERS )
 
 STRUCTBITS = ':;[]{}()'
+
+def debug( *args, **kwargs ):
+    if G_DEBUG_OPTIMIZATIONS:
+        kwargs['file'] = sys.stderr
+        print( *args, **kwargs )
 
 def log( *args, **kwargs ):
     kwargs[ 'file' ] = sys.stderr
@@ -55,6 +63,12 @@ def main():
         action='store_true'      ,
         dest='showOptimizations' ,
         default=False            ,
+    )
+    parser.add_option(
+        '--debug-optimizations',
+        action='store_true',
+        dest='debugOptimizations',
+        default=False,
     )
     parser.add_option(
         '--inline-only',
@@ -90,6 +104,10 @@ def main():
     if options.showOptimizations:
         global G_SHOW_OPTIMIZATIONS
         G_SHOW_OPTIMIZATIONS = True
+        
+    if options.debugOptimizations:
+        global G_DEBUG_OPTIMIZATIONS
+        G_DEBUG_OPTIMIZATIONS = True
         
     if options.inlineOnly:
         global G_INLINE_ONLY
@@ -3017,6 +3035,10 @@ def analyze_functions( allFns, startname ):
                 pass
             elif cc.kind() == 'localfn':
                 pass
+            elif cc.kind() == 'FORWARDJUMPIF':
+                pass
+            elif cc.kind() == 'JUMPTARGET':
+                pass
             elif cc.kind() == 'fnref':
                 if cc.value() not in allFns:
                     raise Exception( 'address of unknown function taken in %s: %s' % ( repr( dd ), repr( cc ) ) )
@@ -3210,6 +3232,7 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
             # optimize_inline_nonrecursive_functions_of_less_than_threshold_commands_not_touching_the_control_stack ,
             # disabled: see note below optimize_tailcall_last_function_call_if_no_locals ,
             optimize_inline_nonrecursive,
+            optimize_perform_token_replacements,
         ]:
             changed, updatedfn = optimizefn(
                 notes     = notes     ,
@@ -3365,7 +3388,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
         
         if command.kind() == 'localfn' and command.value() == '$.noopt':
             if G_SHOW_OPTIMIZATIONS:
-                log('[inline-nonrecursive] refusing to optimize due to $.noopt in %s' % repr( unmangle( name ) ) )
+                debug('[inline-nonrecursive] refusing to optimize due to $.noopt in %s' % repr( unmangle( name ) ) )
             changed = False
             break
         
@@ -3381,7 +3404,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
             
             if isRecursive:
                 if G_SHOW_OPTIMIZATIONS:
-                    log('[inline-nonrecursive] refusing to inline %s into %s because it is recursive' % (
+                    debug('[inline-nonrecursive] refusing to inline %s into %s because it is recursive' % (
                         repr( unmangle( vv ) ) ,
                         repr( unmangle( name ) ) ,
                     ))
@@ -3389,7 +3412,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
             elif hasCodeTouchingTheCallStack:
                 # no optimization for you
                 if G_SHOW_OPTIMIZATIONS:
-                    log('[inline-nonrecursive] refusing to inline into %s due to use of r15 in assembly in %s' % (
+                    debug('[inline-nonrecursive] refusing to inline into %s due to use of r15 in assembly in %s' % (
                         repr( unmangle( name ) ) ,
                         repr( unmangle( vv ) ) ,
                     ))
@@ -3400,7 +3423,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                     m = G_INLINE_ONLY.match(unmangle( vv ))
                     if not m:
                         if G_SHOW_OPTIMIZATIONS:
-                            log('[inline-nonrecursive] refusing to inline %s, does not match --inline-only regex' % (
+                            debug('[inline-nonrecursive] refusing to inline %s, does not match --inline-only regex' % (
                                 repr( unmangle( vv ) ),
                             ))
                         rewritten.append( command )
@@ -3410,7 +3433,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                     m = G_INLINE_EXCEPT.match(unmangle( vv ))
                     if m:
                         if G_SHOW_OPTIMIZATIONS:
-                            log('[inline-nonrecursive] refusing to inline %s, matches --inline-except regex' % (
+                            debug('[inline-nonrecursive] refusing to inline %s, matches --inline-except regex' % (
                                 repr( unmangle( vv ) ),
                             ))
                         rewritten.append( command )
@@ -3418,7 +3441,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                 
                 if any( vv.kind() == 'localfn' and vv.value() == '$.noopt' for vv in opted[vv].body().commands() ):
                     if G_SHOW_OPTIMIZATIONS:
-                        log('[inline-nonrecursive] refusing to inline in to %s due to "$.noopt" in %s' % (
+                        debug('[inline-nonrecursive] refusing to inline in to %s due to "$.noopt" in %s' % (
                             repr( unmangle( name ) ) ,
                             repr( unmange( vv ) ) ,
                         ))
@@ -3455,10 +3478,8 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                             nextno += 1
                             rewritten.append( Token(
                                 location = subcommand.location() ,
-                                kind     = 'code'                ,
-                                value    = INLINED_LEAVEIF % {
-                                    'endlabel' : end,
-                                },
+                                kind     = 'FORWARDJUMPIF'       ,
+                                value    = end                   ,
                             ))
                         elif subcommand.kind() == 'code':
                             rewritten.append( Token(
@@ -3466,14 +3487,26 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                                 kind     = 'code'                ,
                                 value    = nest_labels( inlineno, vv, subcommand.value() ) ,
                             ))
+                        elif subcommand.kind() == 'FORWARDJUMPIF':
+                            rewritten.append( Token(
+                                location = subcommand.location() ,
+                                kind     = 'FORWARDJUMPIF'       ,
+                                value    = '.' + vv + '.' + str(inlineno) + subcommand.value() ,
+                            ))
+                        elif subcommand.kind() == 'JUMPTARGET':
+                            rewritten.append( Token(
+                                location = subcommand.location() ,
+                                kind     = 'JUMPTARGET'          ,
+                                value    = '.' + vv + '.' + str(inlineno) + subcommand.value(),
+                            ))
                         else:
                             rewritten.append( subcommand )
                     
                     if includeEndLabel:
                         rewritten.append( Token(
                             location = subcommand.location() ,
-                            kind     = 'code'                ,
-                            value    = '; inline end\n' + end + ':'             ,
+                            kind     = 'JUMPTARGET'          ,
+                            value    = end                   ,
                         ))
         else:
             rewritten.append( command )
@@ -3484,6 +3517,22 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
         return False, targetfn
 
 def nest_labels( uniqueno, prefix, code ):
+    if '===' not in code:
+        return nest_labels_munge( uniqueno, prefix, code )
+    
+    sections = parse_code_sections( IMPLEMENTATION, code )
+    
+    for section in sections:
+        if not (section['headers'].get('impl',IMPLEMENTATION) == IMPLEMENTATION):
+            continue
+        elif not (section['headers'].get('type','code') == 'code'):
+            continue
+        else:
+            section['body'] = nest_labels_munge( uniqueno, prefix, section['body'] )
+    
+    return unparse_code_sections( sections )
+    
+def nest_labels_munge( uniqueno, prefix, code ):
     
     isLocalLabel = re.compile( '(?P<before>.*)(?P<current>[.][A-Za-z_-]*)(?P<after>.*)' )
     
@@ -3504,6 +3553,91 @@ def nest_labels( uniqueno, prefix, code ):
         else:
             rewritten.append( line )
     return '\n'.join(rewritten)
+
+def optimize_perform_token_replacements( notes, recursive, opted, name, targetfn ):
+    
+    rewritten = []
+    changed = False
+    
+    for command in targetfn.body().commands():
+        if command.kind() != 'code':
+            rewritten.append( command )
+            continue
+        
+        if '===' not in command.value():
+            rewritten.append( command )
+            continue
+        
+        for section in parse_code_sections( IMPLEMENTATION, command.value() ):
+            if not (section['headers'].get('impl', IMPLEMENTATION) == IMPLEMENTATION):
+                if G_SHOW_OPTIMIZATIONS:
+                    debug( '[token-replacements] skipping section, wrong impl: %s' % repr( section ) )
+                continue
+            
+            if not (section['headers'].get('type','code') == 'token-replace'):
+                if G_SHOW_OPTIMIZATIONS:
+                    debug( '[token-replacements] skipping section, wrong type: %s' % repr( section ) )
+                continue
+            
+            when = section['headers'].get('when', None)
+            if when == None:
+                raise Exception( 'you cannot have a rewrite rule with no when' )
+            
+            constraints = [ e.strip() for e in when.split(',') ]
+            matches = True
+            for index, constraint in enumerate( reversed( constraints ) ):
+                if constraint == 'I':
+                    if index >= len( rewritten ):
+                        matches = False
+                        break
+                    elif rewritten[-index-1].kind() != 'integer':
+                        matches = False
+                        break
+                else:
+                    raise Exception( 'unknown when constraint: %s, in %s' % ( repr( constraint ), repr( command ) ) )
+            
+            if not matches:
+                continue
+            
+            changed = True
+            
+            relevant = rewritten[-len(constraints):None]
+            rewritten = rewritten[None:-len(constraints)]
+            
+            gs = globals().copy()
+            gs['self'] = command
+            todo = eval( section['body'], gs )
+            
+            new = todo( *relevant )
+            
+            if G_SHOW_OPTIMIZATIONS:
+                log( '[token-replacements] replaced %s with %s' % (
+                    (
+                        tuple(r.value() for r in relevant)
+                        +
+                        (
+                            (repr( command.location() ),)
+                            if not section['headers'].get('name',None) else
+                            (section['headers'].get('name'),)
+                        )
+                    ),
+                    tuple(n.value() for n in new),
+                ))
+            
+            for n in new:
+                rewritten.append( n )
+            
+            break
+            
+        else:
+            if G_SHOW_OPTIMIZATIONS:
+                debug( '[fetch-rewrite-rule] no matching rewrite rule for %s' % repr( command ) )
+            rewritten.append( command )
+    
+    if changed:
+        return True, targetfn.rewriting_commands( rewritten )
+    else:
+        return False, targetfn
 
 # returnindex + 1
 # newframe = stack + sizeof( returnframe = 16) * returnindex
@@ -3571,7 +3705,10 @@ def generate_code(
             elif command.kind() == 'code':
                 code.append( '\n' )
                 code.append( '; including code literal\n' )
-                code.append( command.value() )
+                code.append( fetch_code(
+                    impl = IMPLEMENTATION ,
+                    data = command.value() ,
+                ))
                 code.append( '\n' )
                 
             elif command.kind() == 'string':
@@ -3603,6 +3740,12 @@ def generate_code(
                     code.append( '   ; push integer < 32bit\n' )
                     code.append( '   mov qword [r14], %s\n' % command.value() )
                     code.append( '   add r14, 8\n' )
+            
+            elif command.kind() == 'FORWARDJUMPIF':
+                code.append( INLINED_LEAVEIF % { 'endlabel' : command.value() } )
+                
+            elif command.kind() == 'JUMPTARGET':
+                code.append( command.value() + ":\n" )
             
             elif command.kind() == 'localfn':
                 if command.value().startswith('$.'):
@@ -3800,7 +3943,92 @@ def asm_stringize( ss ):
     bits.append( '0' )
     
     return ''.join( bits )
+
+def fetch_code( impl, data ):
+    if '===' not in data:
+        return data
     
+    for section in parse_code_sections( impl, data ):
+        
+        if not (section['headers'].get('impl', impl) == impl):
+            if G_SHOW_OPTIMIZATIONS:
+                debug( '[fetch-code] skipping section, wrong impl: %s' % repr( section ) )
+            continue
+        
+        if not (section['headers'].get('type','code') == 'code'):
+            if G_SHOW_OPTIMIZATIONS:
+                debug( '[fetch-code] skipping section, wrong type: %s' % repr( section ) )
+            continue
+        
+        if not (section['headers'].get('when', '').strip() == ''):
+            if G_SHOW_OPTIMIZATIONS:
+                debug( '[fetch-code] skipping section, has conditional: %s' % repr( section ) )
+            continue
+        
+        return section['body']
+    
+    raise Exception( 'no appropriate code section found: %s' % repr( data ) )
+    
+def parse_code_sections( impl, data ):
+    lines = Source( data.strip().split('\n') )
+    
+    done = False
+    sections = []
+    while True:
+        headers = {}
+        while True:
+            line = lines.take()
+            if line == None:
+                done = True
+                break
+            elif '===' in line:
+                raise Exception( 'cannot have === in headers section, separate headers by at least one blank line, in %s' % (
+                    repr( data ) ,
+                ))
+            elif line.strip() == "":
+                break
+            else:
+                name, value = line.strip().split(':',1)
+                name = name.strip()
+                value = value.strip()
+                headers[ name ] = value
+        
+        if done:
+            break
+        
+        body = []
+        while True:
+            line = lines.take()
+            if line == None:
+                done = True
+                break
+            elif '===' in line:
+                break
+            else:
+                body.append( line )
+        
+        sections.append({'headers' : headers, 'body' : '\n'.join(body) + '\n'})
+        
+        if done:
+            break
+    
+    return sections
+
+def unparse_code_sections( sections ):
+    bits = []
+    
+    for section in sections:
+        for header in section['headers'].items():
+            bits.append( '%s : %s' % ( header[0], header[1] ) )
+        
+        bits.append( '' )
+        
+        bits.append( section['body'] )
+        
+        bits.append( '===' )
+    
+    return '\n'.join( bits[:-1] )
+
 #####
 
 if __name__ == '__main__':

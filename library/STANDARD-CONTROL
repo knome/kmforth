@@ -34,7 +34,7 @@
   # done
 ;
 
-# [: todo times
+# [: times todo
 :repeat { $times $todo $loop }
   $times.set  # [: todo
   $todo.set   # [: 

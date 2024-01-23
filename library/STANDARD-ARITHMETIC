@@ -5,6 +5,34 @@
 # 
 :>
   `
+  impl: kmforth/python
+  type: token-replace
+  name: >
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              1 if a.value() > b.value() else 0
+          )
+      )]
+  )
+  
+  =====
+  impl: kmforth/python
+  type: code
+  name: >
+  when: A=rbx,C
+  
+  ERROR UNIMPLEMENTED
+  
+  =====
+  impl: kmforth/python
+  name: >
+  type: code
+  
   ; op >
   sub r14,8      ; right
   mov rax, [r14] ;
@@ -28,6 +56,23 @@
 # 
 :<
   `
+  impl: kmforth/python
+  type: token-replace
+  name: <
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              1 if a.value() < b.value() else 0
+          )
+      )]
+  )
+
+  ===
+
   ; op <
   sub r14,8      ; right
   mov rax, [r14] ;
@@ -49,6 +94,23 @@
 
 :+
   `
+  impl: kmforth/python
+  type: token-replace
+  name: +
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              a.value() + b.value()
+          )
+      )]
+  )
+
+  ===
+  
   ; op +
   sub r14,8      ; right
   mov rax, [r14] ; 
@@ -62,6 +124,23 @@
 
 :-
   `
+  impl: kmforth/python
+  type: token-replace
+  name: -
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              a.value() - b.value()
+          )
+      )]
+  )
+
+  ===
+  
   ; op -
   sub r14,8      ; right
   mov rax, [r14] ; 
@@ -75,6 +154,23 @@
 
 :/
   `
+  impl: kmforth/python
+  type: token-replace
+  name: /
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              a.value() // b.value()
+          )
+      )]
+  )
+
+  ===
+  
   ; op /
   sub r14,8      ; right
   mov rbx, [r14] ; 
@@ -89,6 +185,23 @@
 
 :%
   `
+  impl: kmforth/python
+  type: token-replace
+  name: %
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              a.value() % b.value()
+          )
+      )]
+  )
+
+  ===
+  
   ; op %
   sub r14,8      ; right
   mov rbx, [r14] ; 
@@ -103,6 +216,23 @@
 
 :*
   `
+  impl: kmforth/python
+  type: token-replace
+  name: *
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              a.value() * b.value()
+          )
+      )]
+  )
+
+  ===
+  
   ; op *
   sub r14,8      ; right
   mov rbx, [r14] ; 
@@ -117,6 +247,23 @@
 
 :or
   `
+  impl: kmforth/python
+  type: token-replace
+  name: or
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              a.value() | b.value()
+          )
+      )]
+  )
+
+  ===
+  
   ; op or
   sub r14, 8     ; right
   mov rax, [r14] ;
@@ -130,6 +277,23 @@
 
 :and
   `
+  impl: kmforth/python
+  type: token-replace
+  name: and
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              a.value() & b.value()
+          )
+      )]
+  )
+
+  ===
+  
   ; op and
   sub r14,8     ; right
   mov rax,[r14]
@@ -143,6 +307,23 @@
 
 :==
   `
+  impl: kmforth/python
+  type: token-replace
+  name: ==
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              1 if a.value() == b.value() else 0
+          )
+      )]
+  )
+
+  ===
+  
   ; op ==
   sub r14, 8     ; right
   mov rbx, [r14] ;
@@ -167,7 +348,7 @@
 # [: value shiftAmount
 # 
 :<<
-  [ 2 * ] swap repeat
+  [ 2 * ] repeat
 ;
 
 # right-shift
@@ -175,5 +356,5 @@
 # [: value shiftAmount
 # 
 :>>
-  [ 2 / ] swap repeat
+  [ 2 / ] repeat
 ;

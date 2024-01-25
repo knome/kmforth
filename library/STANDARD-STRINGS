@@ -35,8 +35,7 @@
   
   dup                                         # [: (value/10) (value/10)
   
-  $loop.get                                   # [: (value/10) (value/10) <there>
-  $.jumpIf                                    # [: (value/10)
+  $loop.jumpIf                                # [: (value/10)
   
   #                                           # [: 0
   pop                                         # [:

@@ -3233,6 +3233,7 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
             # disabled: see note below optimize_tailcall_last_function_call_if_no_locals ,
             optimize_inline_nonrecursive,
             optimize_perform_token_replacements,
+            optimize_propagate_localfn_constants,
         ]:
             changed, updatedfn = optimizefn(
                 notes     = notes     ,
@@ -3639,6 +3640,152 @@ def optimize_perform_token_replacements( notes, recursive, opted, name, targetfn
     else:
         return False, targetfn
 
+def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetfn ):
+    
+    # we only propagate the locals here, we'll strip out unused sets in another step
+    
+    # rules:
+    #   if a set is performed after a constant
+    #   if we encounter a nonlocalsafe codeblock we have to forget the locals we are replacing
+    #   
+    #   until we reach another set
+    #   
+    
+    addressed = set()
+    replacements = {}
+    
+    rewritten = []
+    changed = False
+    for index, command in enumerate( targetfn.body().commands() ):
+        
+        if command.kind() == 'code':
+            if '===' in command.value():
+                sections = parse_code_sections( IMPLEMENTATION, command.value() )
+                for section in sections:
+                    if 'locals' in [ e.strip() for e in section['headers'].get('writes','').split(',') ]:
+                        # locals are not safe in this code!
+                        # kill our replacements cache
+                        if G_SHOW_OPTIMIZATIONS:
+                            debug('[propagate-localfn-constants] encountered code with "writes: locals", dropping replacements')
+                        replacements = {}
+                    else:
+                        # locals are safe in this code!
+                        # no need to drop replacements
+                        if G_SHOW_OPTIMIZATIONS:
+                            debug('[propagate-localfn-constants] assuming code without "writes: locals" doesn\'t' )
+            else:
+                # unstructured code can do anything
+                # drop all local references
+                if G_SHOW_OPTIMIZATIONS:
+                    debug('[propagate-localfn-constants] encountered unstructured code, dropping replacements')
+                replacements = {}
+            rewritten.append( command )
+            continue
+        
+        if command.kind() != 'localfn':
+            rewritten.append( command )
+            continue
+        
+        vv = command.value()
+        if vv.startswith('$.'):
+            rewritten.append( command )
+            continue
+        
+        if not rewritten:
+            rewritten.append( command )
+            continue
+        
+        name, fn = vv.split('.',1)
+        
+        if fn == 'set':
+            if rewritten[-1].kind() in ['integer', 'string']:
+                replacements[ name ] = rewritten[-1]
+            elif name in replacements:
+                del replacements[ name ]
+            rewritten.append( command )
+            continue
+        
+        if fn == 'get':
+            if name in replacements:
+                log('[propagate-localfn-constants] replacing %s with constant %s' % (
+                    repr( command ) ,
+                    repr( replacements[ name ] ) ,
+                ))
+                changed = True
+                rewritten.append( replacements[ name ] )
+                continue
+            else:
+                rewritten.append( command )
+                continue
+        
+        if fn == 'here':
+            # we can do better than this
+            # we can check what subset of locals are used until the associated name is .addr, .get or .jump'd
+            # if we hit another <name>.here it's a new loop and we'd have to check that separately
+            # for now, though, we'll just conservatively assume 'loop starts == dead locals'
+            log('[propagate-localfn-constants] dropping all replacements on encountering potential loop start: %s' % repr( command ) )
+            replacements = {}
+            rewritten.append( command )
+            continue
+        
+        if fn == 'addr':
+            if name in replacements:
+                del replacements[ name ]
+            addressed.add( name )
+            
+        if fn == 'incr':
+            if name in replacements:
+                if replacements[ name ].kind() == 'integer':
+                    log('[propagate-localfn-constants] incrementing constant local replacement: %s' % repr( command ) )
+                    replacements[ name ] = Token(
+                        location = replacements[ name ].location() ,
+                        kind     = 'integer' ,
+                        value    = replacements[ name ].value() + 1 ,
+                    )
+                    rewritten.append( command )
+                    continue
+                else:
+                    del replacements[ name ]
+                    rewritten.append( command )
+                    continue
+            else:
+                rewritten.append( command )
+                continue
+        
+        if fn == 'decr':
+            if name in replacements:
+                if replacements[ name ].kind() == 'integer':
+                    log('[propagate-localfn-constants] decrementing constant local replacement: %s' % repr( command ) )
+                    replacements[ name ] = Token(
+                        location = replacements[ name ].location() ,
+                        kind     = 'integer' ,
+                        value    = replacements[ name ].value() - 1 ,
+                    )
+                    rewritten.append( command )
+                    continue
+                else:
+                    del replacements[ name ]
+                    rewritten.append( command )
+                    continue
+            else:
+                rewritten.append( command )
+                continue
+        
+        if fn == 'jump':
+            rewritten.append( command )
+            continue
+        
+        if fn == 'jumpIf':
+            rewritten.append( command )
+            continue
+        
+        raise Exception( '[propagate-localfn-constants] unknown localfn: %s' % repr( command ) )
+    
+    if changed:
+        return True, targetfn.rewriting_commands( rewritten )
+    else:
+        return False, targetfn
+
 # returnindex + 1
 # newframe = stack + sizeof( returnframe = 16) * returnindex
 # newframe[0] = fn_0
@@ -3871,6 +4018,17 @@ def generate_code(
                         code.append( '    ; set local to label following this command\n' )
                         code.append( '    mov qword [r15-8*%d], %s\n' % ( (slotno+1), label) )
                         code.append( '    %s:\n' % label )
+                    elif memberfn == 'jump':
+                        code.append( '    jmp [r15-8*%d]\n' % (slotno+1) )
+                    elif memberfn == 'jumpIf':
+                        label = '.km_dont_jumpif_' + str(nns)
+                        nns += 1
+                        code.append( '    sub r14,8\n' )
+                        code.append( '    mov rax,[r14]\n' )
+                        code.append( '    test rax,rax\n' )
+                        code.append( '    jz %s\n' % label )
+                        code.append( '    jmp [r15-8*%d]\n' % (slotno+1) )
+                        code.append( '%s:\n' % label )
                     elif memberfn == 'addr':
                         code.append( '    ; push address of local (%s) onto stack\n' % repr( localName ) )
                         code.append( '    lea  rax,[r15-8*%d]\n' % (slotno+1) )

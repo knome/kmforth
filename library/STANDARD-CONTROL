@@ -4,8 +4,7 @@
   $loop.here
   $todo.get
   call
-  $loop.get
-  $.jump
+  $loop.jump
 ;
 
 # [: cond todo
@@ -25,9 +24,8 @@
   $todo.get    # push the todo and call it if return was truthy
   $.callIf     # ( consumes ret and leave datastack clean for called function )
   
-  $condRet.get # push the return value back onto the stack
-  $retry.get   # push the retry address
-  $.jumpIf     # pops both, jumps to the address if condret was true
+  $condRet.get  # push the return value back onto the stack
+  $retry.jumpIf # pops cond, jumps to the address in retry if condret was true
   
   # otherwise we end up here with a clean datastack ( excepting what cond/todo may have pushed
   # we can just ignore callstack locals and just walk back past them
@@ -50,8 +48,7 @@
   $todo.get   # [: todo
   call        # [: 
   
-  $loop.get   # [: loop
-  $.jump      # [: 
+  $loop.jump  # [:
 ;
 
 # [: cond onIf onElse

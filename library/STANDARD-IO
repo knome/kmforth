@@ -162,8 +162,7 @@
   dup $thus.set            # [: (amount+thus)
   
   $len.get swap -          # [: (len-(amount+thus))
-  $retry.get               # [: (len-(amount+thus)) retry-addr
-  $.jumpIf                 # [: 
+  $retry.jumpIf            # [: (len-(amount+thus)) retry-addr
   
   0                        # [: 0
 ;
@@ -238,7 +237,7 @@
      syscall/iovec//len.set           ###[: ss?
      
      $cur.get $iovecs.get !=          ###[: ss? <next-is-not-start>
-     $loop.get $.jumpIf               ###[: - # if this don't jump, the stack is empty
+     $loop.jumpIf                     ###[: - # if this don't jump, the stack is empty
      
      # we have a full iovec now
      # time to start writing it out
@@ -303,7 +302,7 @@
      
      dup dup                           ###[: cur! changed-cur remaining remaining remaining
      [ pop swap pop ] $.callIf         ###[: cur! remaining | cur! changed-cur remaining remaining
-     $inner.get $.jumpIf               ###[: cur! remaining | cur! changed-cur remaining
+     $inner.jumpIf                     ###[: cur! remaining | cur! changed-cur remaining
      
      pop                               ###[: cur! changed-cur
      
@@ -313,8 +312,7 @@
      
      $cur.set                          ###[:
      
-     $loop.get
-     $.jump
+     $loop.jump
   ]                            #[: string... n <required-iovec-array-size> <todo>
   
   swap                         #[: string... n <todo> <required-iovec-array-size>

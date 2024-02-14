@@ -1,0 +1,183 @@
+
+# an actual bigendian system will require us to fire at an offset into the qword to hit the right spot
+# probably move this into a system module and make it architecture dependent when we can
+# maybe all this should be in memory/ instead of network/
+# 
+% network/with-if-local-endianness-is-little ( @rc @st )
+  @ @rc @st 1 ;
+;
+
+% network/-foreach-endian-size (@entry.each)
+  @ network/with-if-local-endianness-is-little network/-for-endian-size @entry ;
+;
+
+% network/-for-endian-size ((@sigil @mnemonic) @localIsLittle)
+  :network/local-to-network-@mnemonic
+    @(
+      (@localIsLittle)
+      (@little.expandIf)
+      ` bswap @mnemonic@ [r14-8] `
+    )
+    @(
+      (@localIsLittle)
+      (@big.expandIfNot)
+      # this space intentionally left blank
+    )
+  ;
+  
+  :network/network-to-local-@mnemonic
+    @(
+      (@localIsLittle)
+      (@little.expandIf)
+      ` bswap @mnemonic@ [r14-8] `
+    )
+    @(
+      (@localIsLittle)
+      (@big.expandIfNot)
+      # this space intentionally left blank
+    )
+  ;
+  
+  :network/little-to-bigendian-@mnemonic
+      ` bswap @mnemonic@ [r14-8] `
+  ;
+  
+  :network/big-to-littleendian-@mnemonic
+      ` bswap @mnemonic@ [r14-8] `
+  ;
+;
+
+@ network/-foreach-endian-size (
+    (q qword)
+    (d dword)
+    (w word)
+    # no point in swapping a byte
+);
+
+#[: string-address
+#[: u32 0 | 0 err
+: network/ip4-address-to-u32 { $s $r }
+   
+   $s.set                                        #[:
+   0                                             #[: total
+   
+   $s.get                                        #[: total s
+   
+   conv/string-to-integer-and-rest               #[: total rest value
+   
+   # if s == r the string wasn't a number
+   # 
+   swap $r.copy $s.get == dup                    #[: total value (rest==s) (rest==s)
+   [ pop pop pop
+     0 "bad-format: missing first number" 1
+   ] $.callIf                                    #[: 0 err 1 | total value ((rest==s)=0)
+   $.leaveIf                                     #[: <> 0 err | total value
+   256 * +                                       #[: (total+onebyte)
+   
+   $r.get memory/peek-b strings/ascii-dot != dup #[: total (rest[0]!='.') (rest[0]!='.')
+   
+   [ pop pop
+     0 "bad-format: missing first '.'" 1
+   ] $.callIf                                    #[: 0 err 1 | total (rest[0]!='.')=0
+   $.leaveIf                                     #[: <> 0 err | total
+   
+   $r.get 1 + dup $s.set                         #[: total s
+   
+   conv/string-to-integer-and-rest               #[: total rest value
+   
+   # if s == r the string wasn't a number
+   # 
+   swap $r.copy $s.get == dup                    #[: total value (rest==s) (rest==s)
+   [ pop pop pop
+     0 "bad-format: missing second number" 1
+   ] $.callIf                                    #[: 0 err 1 | total value ((rest==s)=0)
+   $.leaveIf                                     #[: <> 0 err | total value
+   256 * +                                       #[: (total+onebyte)
+   
+   $r.get memory/peek-b strings/ascii-dot != dup #[: total (rest[0]!='.') (rest[0]!='.')
+   
+   [ pop pop
+     0 "bad-format: missing second '.'" 1
+   ] $.callIf                                    #[: 0 err 1 | total (rest[0]!='.')=0
+   $.leaveIf                                     #[: <> 0 err | total
+   
+   $r.get 1 + dup $s.set                         #[: total s
+   
+   conv/string-to-integer-and-rest               #[: total rest value
+   
+   # if s == r the string wasn't a number
+   # 
+   swap $r.copy $s.get == dup                    #[: total value (rest==s) (rest==s)
+   [ pop pop pop
+     0 "bad-format: missing third number" 1
+   ] $.callIf                                    #[: 0 err 1 | total value ((rest==s)=0)
+   $.leaveIf                                     #[: <> 0 err | total value
+   256 * +                                       #[: (total+onebyte)
+   
+   $r.get memory/peek-b strings/ascii-dot != dup #[: total (rest[0]!='.') (rest[0]!='.')
+   
+   [ pop pop
+     0 "bad-format: missing third '.'" 1
+   ] $.callIf                                    #[: 0 err 1 | total (rest[0]!='.')=0
+   $.leaveIf                                     #[: <> 0 err | total
+   
+   $r.get 1 + dup $s.set                         #[: total s
+   
+   conv/string-to-integer-and-rest               #[: total rest value
+   
+   # if s == r the string wasn't a number
+   # 
+   swap $r.copy $s.get == dup                    #[: total value (rest==s) (rest==s)
+   [ pop pop pop
+     0 "bad-format: missing fourth number" 1
+   ] $.callIf                                    #[: 0 err 1 | total value ((rest==s)=0)
+   $.leaveIf                                     #[: <> 0 err | total value
+   256 * +                                       #[: (total+onebyte)
+   
+   $r.get memory/peek-b strings/ascii-nul != dup #[: total (rest[0]!='\0') (rest[0]!='\0')
+   
+   [ pop pop
+     0 "bad-format: trash at end of addr" 1
+   ] $.callIf                                    #[: 0 err 1 | total (rest[0]!='.')=0
+   $.leaveIf                                     #[: <> 0 err | total
+   
+   0                                             #[: total 0
+;
+
+#[: string
+#[: number
+: conv/string-to-integer { $s $loop }
+  #                             #[: string
+  $s.set                        #[: 
+  0                             #[: total
+  $loop.here
+  $s.get memory/peek-b dup dup  #[: total byte byte byte
+  strings/ascii-zero < swap     #[: total byte (byte<"0") byte
+  strings/ascii-nine > or dup   #[: total byte ((byte<"0")||(byte>"9")) ((byte<"0")||(byte>"9"))
+  [ pop pop 1 ] $.callIf        #[: total 1 | total byte (((byte<"0")||(byte>"9"))=0)
+  $.leaveIf                     #[: <> total | total byte
+  strings/ascii-zero -          #[: total (byte-"0")
+  swap 10 * +                   #[: total=(total*10+(byte-"0"))
+  $s.incr
+  $loop.jump
+;
+
+#[: string
+#[: number
+: conv/string-to-integer-and-rest
+  {
+    $loop
+  }
+  #                            #[: string
+  0                            #[: string total
+  $loop.here
+  1 nth memory/peek-b dup dup  #[: string total byte byte byte
+  strings/ascii-zero < swap    #[: string total byte (byte<"0") byte
+  strings/ascii-nine > or dup  #[: string total byte ((byte<"0")||(byte>"9")) ((byte<"0")||(byte>"9"))
+  [ pop pop 1 ] $.callIf       #[: string total 1 | string total byte (((byte<"0")||(byte>"9"))=0)
+  $.leaveIf                    #[: <> string total | string total byte
+  strings/ascii-zero -         #[: string total (byte-"0")
+  swap 10 * +                  #[: string total=(total*10+(byte-"0"))
+  swap 1 + swap                #[: (string+1) total
+  $loop.jump
+;

@@ -1,0 +1,10 @@
+
+@ "standard" ;
+
+:main
+  "127" conv/string-to-integer printno
+  
+  "127hello" conv/string-to-integer-and-rest printno print
+  
+  "127.0.0.1" network/ip4-address-to-u32
+;

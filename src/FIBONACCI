@@ -1,0 +1,33 @@
+
+@ "standard" ;
+
+# calculate the nth fibonacci number
+# 
+# [: n
+# [: fib(n)
+:fibonacci
+  dup 2 <   # nth (nth<2)
+  $.leaveIf # <> nth | nth   # we return the given value on the stack by leaving it
+  
+  dup 1 -   # nth (nth-1)
+  fibonacci # nth f(nth-1)
+  swap      # f(nth-1) nth
+  2 -       # f(nth-1) (nth-2)
+  fibonacci # f(nth-1) f(nth-2)
+  +         # (f(nth-1)+f(nth)-2)
+;
+
+:main { $loop $hello-world }
+  "start" print
+  0          # [: i
+  $loop.here
+  dup        # [: i i
+  fibonacci  # [: i fib(i)
+  printno    # [: i 
+  1 +        # [: (i+1)
+  dup 36 <   # [: (i+1) ((i+1)<36)
+  $loop.get  # [: (i+1) ((i+1)<36) <loop>
+  $.jumpIf   # [: (i+1)
+  pop
+  "exit" print
+;

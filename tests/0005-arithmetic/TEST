@@ -1,5 +1,5 @@
 
-@ "STANDARD" ;
+@ "standard" ;
 
 :main
   5 3 % 2 ==  not "bad math" or-die

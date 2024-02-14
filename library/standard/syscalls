@@ -281,10 +281,10 @@
 
 % syscall/bind/sockaddr-in4 (@rc @st)
   @ @rc @st (
-    (sin-family type/u16)
-    (sin-port   type/u16)
-    (sin-addr   type/u32)
-    (-unused-   type/u64)
+    (family     type/u16)
+    (port       type/u16)
+    (addr       type/u32)
+    # (-unused-   type/u64) # do we need this?
   );
 ;
 @ struct/define syscall/bind/sockaddr-in4 ;

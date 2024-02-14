@@ -13,6 +13,7 @@
 # 0 is the first element on the stack, ignoring <index>
 # 
 # [: index
+# [: <nth-item>
 :nth
   `
   mov rax,[r14-8]  ; index
@@ -23,6 +24,50 @@
   mov [r14-8],rbx  ; put on top of stack replacing index
   `
 ;
+
+# push the address of the nth stack item
+# 0 is the first element on the stack, ignoring <index>
+# 
+# [: index
+# [: <nth-item-addr>
+:nth-addr
+  `
+  mov rax,[r14-8] ; index
+  add rax,2       ; (offset for top-of-stack and drop below first element)
+  shl rax,3       ; index*8
+  neg rax         ; -(index*8)
+  add rax,r14     ; addr
+  mov [r14-8],rax ; push to top of stack
+  `
+;
+
+# busted, look into it later
+# 
+# #[: index
+# #[: 
+# :nth-incr
+#   `
+#   mov rax,[r14-8]     ; index
+#   add rax,2           ; (offset for top-of-stack and drop below first element)
+#   shl rax,3           ; index*8
+#   neg rax             ; -(index*8)
+#   add rax,r14         ; addr
+#   add qword [rax],1
+#   `
+# ;
+# 
+# #[: index
+# #[: 
+# :nth-decr
+#   `
+#   mov rax,[r14-8]     ; index
+#   add rax,2           ; (offset for top-of-stack and drop below first element)
+#   shl rax,3           ; index*8
+#   neg rax             ; -(index*8)
+#   add rax,r14         ; addr
+#   sub qword [rax],1
+#   `
+# ;
 
 :stack/callstack-depth
   `

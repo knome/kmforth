@@ -289,15 +289,24 @@ class FileSource:
             or
             self._path.startswith('../')
         ):
-            return os.path.join(
+            initial = os.path.join(
                 self._cwd  ,
                 self._path ,
             )
         else:
-            return os.path.join(
+            initial = os.path.join(
                 self._libraryPath ,
                 self._path        ,
             )
+        
+        if os.path.isdir( initial ):
+            full = initial + '/default'
+            if os.path.isdir( full ):
+                raise Exception( 'default in a directory import cannot itself be a directory: %s' % repr( full ) )
+        else:
+            full = initial
+        
+        return full
     
     def cwd_for_includes(
         self, 

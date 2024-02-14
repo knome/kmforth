@@ -63,6 +63,37 @@
   `
 ;
 
+% strings/-define-ascii (@bit.each)
+  @ strings/-define-ascii-bit @bit ;
+;
+
+% strings/-define-ascii-bit ((@name @value))
+  :strings/ascii-@name @value ;
+;
+
+@ strings/-define-ascii (
+  (nul     0)
+  (bel     7)
+  (lf     10) (line-feed 10) (nl 10) (newline 10)
+  (cr     13) (carriage-return 13)
+  (esc    27) (escape 27)
+  (dot    46) (period 46) (. 46)
+  (A      64)
+  (Z      90)
+  (zero   48)
+  (one    49)
+  (two    50)
+  (three  51)
+  (four   52)
+  (five   53)
+  (six    54)
+  (seven  55)
+  (eight  56)
+  (nine   57)
+  (a      97)
+  (z     122)
+);
+
 # # string buffer
 # # a checked buffer for building up strings before writing them as a whole
 # 

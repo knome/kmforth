@@ -1,10 +1,10 @@
 
-@ "STANDARD" ;
+@ "standard" ;
 
 :-printno
   [
                               # [: value buffer=(number-buffer (tmp, on callstack))
-    string/unsigned-to-ascii  # [: <string-pointer>
+    strings/unsigned-to-ascii # [: <string-pointer>
     print pop                 # [:
   ] strings/number-buffer.size stack/call-with-stack-buffer
 ;

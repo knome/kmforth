@@ -1,0 +1,14 @@
+
+@ "./stack" ;
+@ "./memory" ;
+@ "./arithmetic" ;
+@ "./syscalls" ;
+@ "./startup" ;
+@ "./io" ;
+@ "./control" ;
+@ "./errno" ;
+@ "./structs" ;
+@ "./gcarena" ;
+@ "./strings" ;
+@ "./cursor" ;
+@ "./networking" ;

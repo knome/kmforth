@@ -56,6 +56,22 @@
     mov [rax],@writeSource@
     `
   ;
+  
+  :memory/poke-incr-@name
+    `
+    mov rax,[r14-8]
+    sub r14,8
+    add @mnemonic@ [rax],1
+    `
+  ;
+  
+  :memory/poke-decr-@name
+    `
+    mov rax,[r14-8]
+    sub r14,8
+    sub @mnemonic@ [rax],1
+    `
+  ;
 ;
 
 # inefficient overlap safe memory move

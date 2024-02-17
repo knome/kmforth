@@ -3,4 +3,21 @@
 
 @ "standard" ;
 
-:main 1 0 > [ "hello" print ][ "world" print ] if ;
+:main { $hello $world }
+  "hello" $hello.set
+  "world" $world.set
+  
+  $hello.get print
+  $world.get print
+  
+  # { $hello.get }
+  
+  # 1
+  # {
+  #   $hello.get print
+  # }
+  # {
+  #   $world.get print
+  # }
+  # if
+;

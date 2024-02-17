@@ -140,6 +140,8 @@ def main():
     
     namedMacroExpansions = []
     
+    uniques = Uniques()
+    
     while pending:
         
         pp = pending.pop()
@@ -161,6 +163,7 @@ def main():
                 tokens        = tokens       ,
                 currentModule = pp           ,
                 macroContext  = macroContext ,
+                uniques       = uniques      ,
             ))
             
             while True:
@@ -184,6 +187,9 @@ def main():
                             
                             for subfn in fn.body().subfns():
                                 fns.append( subfn )
+                                
+                            for subcl in fn.body().subcls():
+                                fns.append( subcl )
                 
                 elif definition.definition_type() == 'include':
                     # includes can be specified all over
@@ -212,6 +218,7 @@ def main():
         macroFunctions = expand_macros(
             namedMacroExpansions = namedMacroExpansions ,
             macroContext         = macroContext         ,
+            uniques              = uniques              ,
         )
         fns = []
         for mfn in macroFunctions:
@@ -718,9 +725,10 @@ def extract_macrovar( initial, characters ):
         )
 
 def parse_definitions(
-    tokens               ,
-    currentModule        ,
-    macroContext         ,
+    tokens        ,
+    currentModule ,
+    macroContext  ,
+    uniques       ,
 ):
     while True:
         initial = tokens.take()
@@ -732,6 +740,7 @@ def parse_definitions(
                 tokens        = tokens        ,
                 currentModule = currentModule ,
                 macroContext  = macroContext  ,
+                uniques       = uniques       ,
             )
         elif initial.kind() == '@':
             pp = tokens.peek()
@@ -747,6 +756,7 @@ def parse_definitions(
                     tokens        = tokens        ,
                     currentModule = currentModule ,
                     macroContext  = macroContext  ,
+                    uniques       = uniques       ,
                 )
         elif initial.kind() == 'word' and initial.value() == '%':
             yield parse_macro_definition(
@@ -764,6 +774,7 @@ def parse_named_function(
     tokens        ,
     currentModule ,
     macroContext  ,
+    uniques       ,
 ):
     name = tokens.take()
     if not name:
@@ -798,7 +809,10 @@ def parse_named_function(
             tokens  = Source( expand_bitstream(
                 macroContext = macroContext       ,
                 tokens       = Source( bodyBits ) ,
+                uniques      = uniques            ,
             )),
+            parent  = mangle(':' + name.value()),
+            uniques = uniques,
         )
     
     return NamedFunction(
@@ -807,21 +821,46 @@ def parse_named_function(
         body     = body               ,
     )
 
-def parse_lambda_definition( initial, tokens ):
-    body = parse_body( initial, tokens )
-    return LambdaFunction(
-        location = initial.location() ,
-        body     = body               ,
-    )
+def parse_lambda_definition( initial, tokens, parent, uniques ):
+    if initial.kind() == '[':
+        name = 'kmlambda_%s' % str(uniques.get())
+        body = parse_body(
+            initial ,
+            tokens  ,
+            parent  ,
+            uniques ,
+        )
+        return LambdaFunction(
+            location   = initial.location() ,
+            lambdaName = name               ,
+            body       = body               ,
+        )
+    else:
+        name = 'kmclosure_%s' % str(uniques.get())
+        body = parse_body(
+            initial ,
+            tokens  ,
+            name    ,
+            uniques ,
+        )
+        return ClosureFunction(
+            location    = initial.location() ,
+            closureName = name               ,
+            body        = body               ,
+            parent      = parent             ,
+        )
 
 def parse_body(
     initial ,
     tokens  ,
+    parent  ,
+    uniques ,
 ):
     localfns = parse_optional_locals( tokens )
     
     commands = []
     subfns   = []
+    subcls   = []
     while True:
         pt = tokens.peek()
         if not pt:
@@ -830,35 +869,64 @@ def parse_body(
             break
         elif pt.kind() == ']':
             break
-        elif pt.kind() == '[':
+        elif pt.kind() == '}':
+            raise Exception( 'unexpected "}" does not close any closing lambda at %s' % pt.location() )
+        elif pt.kind() in '[{':
             tokens.take()
             subfntoks = []
-            depth = 0
+            depth = []
             while True:
                 st = tokens.take()
                 if st == None:
-                    raise Exception( 'expected "]" following unclosed %s' % repr( pt ) )
-                elif st.kind() == ']':
-                    if depth == 0:
-                        break
+                    if len(depth):
+                        raise Exception( 'unclosed %s at %s' % (repr(depth[-1].kind()), depth[-1].location()) )
                     else:
-                        depth -= 1
+                        raise Exception( 'unclosd %s at' % repr(repr(pt.kind()), pt.location()) )
+                elif st.kind() == ']':
+                    if len(depth) == 0:
+                        break
+                    elif depth[-1].kind() == '[':
+                        depth.pop()
                         subfntoks.append( st )
+                    else:
+                        raise Exception( 'unexpected "]" does not line up with a matching "[" at %s' % pt.location() )
+                elif st.kind() == '}':
+                    if len(depth) == 0:
+                        break
+                    elif depth[-1].kind() == '{':
+                        depth.pop()
+                        subfntoks.append( st )
+                    else:
+                        raise Exception( 'unexpected "}" does not line up with a matching "[" at %s' % pt.location() )
                 elif st.kind() == '[':
-                    depth += 1
+                    depth.append(st)
+                    subfntoks.append( st )
+                elif st.kind() == '{':
+                    depth.append(st)
                     subfntoks.append( st )
                 else:
                     subfntoks.append( st )
             subfn = parse_lambda_definition(
                 initial = pt                  ,
                 tokens  = Source( subfntoks ) ,
+                parent  = parent              ,
+                uniques = uniques             ,
             )
-            subfns.append( subfn )
-            commands.append( Token(
-                location = subfn.location()     ,
-                kind     = 'subfn'              ,
-                value    = subfn.name().value() ,
-            ))
+            if subfn.kind() == 'lambda':
+                subfns.append( subfn )
+                commands.append( Token(
+                    location = subfn.location()     ,
+                    kind     = 'subfn'              ,
+                    value    = subfn.name().value() ,
+                ))
+            elif subfn.kind() == 'closure':
+                subcls.append( subfn )
+                commands.append( Token(
+                    location = subfn.location()     ,
+                    kind     = 'subcl'              ,
+                    value    = subfn.name().value() ,
+                ))
+        
         elif pt.kind() == 'word':
             tokens.take()
             commands.append( Token(
@@ -888,6 +956,7 @@ def parse_body(
         commands = commands           ,
         localfns = localfns           ,
         subfns   = subfns             ,
+        subcls   = subcls             ,
     )
 
 def parse_optional_locals( tokens ):
@@ -996,10 +1065,10 @@ class NamedFunction:
         )
     
     def __init__(
-        self     ,
-        location ,
-        name     ,
-        body     ,
+        self        ,
+        location    ,
+        name        ,
+        body        ,
     ):
         self._location = location
         self._name     = name
@@ -1035,40 +1104,28 @@ class LambdaFunction:
     
     def rewriting_commands( self, new ):
         return LambdaFunction(
-            location = self._location                       ,
-            body     = self._body.rewriting_commands( new ) ,
-            _name    = self._name                           ,
+            location   = self._location                       ,
+            lambdaName = self._lambdaName                     ,
+            body       = self._body.rewriting_commands( new ) ,
         )
     
     def rewriting_localfns( self, new ):
         return LambdaFunction(
-            location = self._location                       ,
-            body     = self._body.rewriting_localfns( new ) ,
-            _name    = self._name                           ,
+            location    = self._location                       ,
+            lambdaNname = self._lambdaName                     ,
+            body        = self._body.rewriting_localfns( new ) ,
         )
     
-    NN = 0
-    
     def __init__(
-        self         ,
-        location     ,
-        body         ,
-        _name = None ,
+        self       ,
+        location   ,
+        lambdaName ,
+        body       ,
     ):
-        self._location = location
-        self._body     = body
-        
-        if _name != None:
-            self._name = _name
-        else:
-            self._name = self._get_name()
+        self._location   = location
+        self._lambdaName = lambdaName
+        self._body       = body
         return
-    
-    @classmethod
-    def _get_name( klass ):
-        nn = 'kmlambda_%s' % str( klass.NN )
-        klass.NN += 1
-        return nn
     
     def __repr__( self ):
         return '<LambdaFunction %s name=%s commands=%d>' % (
@@ -1077,14 +1134,66 @@ class LambdaFunction:
             len( self._body.commands() ) ,
         )
     
+    def kind( self ): return 'lambda'
+    
     def location ( self ): return self._location
     def body     ( self ): return self._body
+    def parent   ( self ): return None
     
     def name( self ):
         return Token(
             location = self._location ,
             kind   = 'word'           ,
-            value  = self._name       ,
+            value  = self._lambdaName ,
+        )
+
+class ClosureFunction:
+    
+    def rewriting_commands( self, new ):
+        return ClosureFunction(
+            location    = self._location                       ,
+            closureName = self._closureName                    ,
+            body        = self._body.rewriting_commands( new ) ,
+        )
+    
+    def rewriting_localfns( self, new ):
+        return ClosureFunction(
+            location    = self._location                       ,
+            closureName = self._closureName                    ,
+            body        = self._body.rewriting_localfns( new ) ,
+        )
+    
+    def __init__(
+        self        ,
+        location    ,
+        closureName ,
+        body        ,
+        parent      ,
+    ):
+        self._location    = location
+        self._closureName = closureName
+        self._body        = body
+        self._parent      = parent
+        return
+    
+    def __repr__( self ):
+        return '<ClosureFunction %s name=%s commands=%d>' % (
+            repr( self._location )       ,
+            self.name()                  ,
+            len( self._body.commands() ) ,
+        )
+    
+    def kind( self ): return 'closure'
+    
+    def location ( self ): return self._location
+    def body     ( self ): return self._body
+    def parent   ( self ): return self._parent
+    
+    def name( self ):
+        return Token(
+            location = self._location  ,
+            kind   = 'word'            ,
+            value  = self._closureName ,
         )
 
 class Body:
@@ -1111,10 +1220,12 @@ class Body:
         commands ,
         localfns ,
         subfns   ,
+        subcls   ,
     ):
         self._location = location
         self._commands = commands
         self._subfns   = subfns
+        self._subcls   = subcls
         
         self._localfns      = localfns
         self._localfnNames  = []
@@ -1163,6 +1274,9 @@ class Body:
     
     def subfns( self ):
         return self._subfns
+    
+    def subcls( self ):
+        return self._subcls
     
     def get_localfn_slotno(
         self ,
@@ -2373,6 +2487,7 @@ def parse_named_macro_expansion(
     tokens        ,
     currentModule ,
     macroContext  ,
+    uniques       ,
 ):
     # not expanding it yet, just recording the invocation so we can expand it later
     # the @ is in initial
@@ -2403,6 +2518,7 @@ def parse_named_macro_expansion(
         expandedArgumentBits = expand_bitstream(
             macroContext = macroContext      ,
             tokens      = argumentBitsSource ,
+            uniques     = uniques            ,
         )
         
         expandedArgumentBitsSource = Source( expandedArgumentBits )
@@ -2583,11 +2699,13 @@ class MacroList:
 def expand_macros(
     namedMacroExpansions ,
     macroContext         ,
+    uniques              ,
 ):
     for macroExpansion in namedMacroExpansions:
         fns = expand_macro(
             macroExpansion = macroExpansion ,
             macroContext   = macroContext   ,
+            uniques        = uniques        ,
         )
         for fn in fns:
             yield fn
@@ -2595,6 +2713,7 @@ def expand_macros(
 def expand_macro(
     macroExpansion ,
     macroContext   ,
+    uniques        ,
 ):
     if G_SHOW_EXPANSIONS:
         log( 'EXPANDING-NAMED', macroExpansion.simple() )
@@ -2624,12 +2743,14 @@ def expand_macro(
                 expandedBits = expand_bitstream(
                     macroContext = expansionContext                      ,
                     tokens       = Source( unexpandedDefinition.bits() ) ,
+                    uniques      = uniques                               ,
                 )
                 expandedFunction = parse_named_function(
                     initial       = unexpandedDefinition.initial()        ,
                     tokens        = Source( expandedBits )                ,
                     currentModule = unexpandedDefinition.current_module() ,
                     macroContext  = macroContext                          ,
+                    uniques       = uniques                               ,
                 )
                 expandedFunctions.append( expandedFunction )
                 if G_SHOW_EXPANSIONS:
@@ -2640,16 +2761,19 @@ def expand_macro(
                 expandedBits = expand_bitstream(
                     macroContext = expansionContext                      ,
                     tokens       = Source( unexpandedDefinition.bits() ) ,
+                    uniques      = uniques                               ,
                 )
                 expandedExpansion = parse_named_macro_expansion(
                     initial       = unexpandedDefinition.initial()        ,
                     tokens        = Source( expandedBits )                ,
                     currentModule = unexpandedDefinition.current_module() ,
                     macroContext  = macroContext                          ,
+                    uniques       = uniques                               ,
                 )
                 for fn in expand_macro(
                     macroExpansion = expandedExpansion ,
                     macroContext   = macroContext      ,
+                    uniques        = uniques           ,
                 ):
                     expandedFunctions.append( fn )
                 
@@ -2766,6 +2890,7 @@ class NamedNonArgSource:
 def expand_bitstream(
     macroContext ,
     tokens       ,
+    uniques      ,
 ):
     while True:
         bit = tokens.take()
@@ -2784,6 +2909,7 @@ def expand_bitstream(
                 macroContext = macroContext ,
                 tokens       = tokens       ,
                 expansionId  = EXPANSIONID  ,
+                uniques      = uniques      ,
             ):
                 if G_SHOW_EXPANSIONS:
                     EXPANDED.append( bit )
@@ -2806,6 +2932,7 @@ def expand_bitstream(
                 bits     = list(expand_bitstream(
                     macroContext = macroContext ,
                     tokens       = Source( bit.bits() ) ,
+                    uniques      = uniques ,
                 )),
             )
         elif bit.kind() in [ ';', '{', '}', '[', ']', '(', ')', 'localfn', 'word', 'integer', 'string', 'code', 'fnref' ]:
@@ -2893,6 +3020,7 @@ def extract_and_expand_local_macro(
     macroContext ,
     tokens       ,
     expansionId  ,
+    uniques      ,
 ):
     # ( () () ... )
     # 
@@ -2910,6 +3038,7 @@ def extract_and_expand_local_macro(
         arguments = extract_local_macro_arguments(
             macroContext = macroContext ,
             tokens       = tokens       ,
+            uniques      = uniques      ,
         )
         
         parameters = parse_macro_parameter_list(
@@ -2953,6 +3082,7 @@ def extract_and_expand_local_macro(
             expandedBody = expand_bitstream(
                 macroContext = expansionContext ,
                 tokens       = bodyBitsSource   ,
+                uniques      = uniques          ,
             )
             
             for bit in expandedBody:
@@ -2963,6 +3093,7 @@ def extract_and_expand_local_macro(
 def extract_local_macro_arguments(
     macroContext ,
     tokens       ,
+    uniques      ,
 ):
     start = tokens.take()
     if not start:
@@ -2979,6 +3110,7 @@ def extract_local_macro_arguments(
     expandedArgumentBits = list( expand_bitstream(
         macroContext = macroContext       ,
         tokens       = argumentBitsSource ,
+        uniques      = uniques            ,
     ))
     
     expandedArgumentBitsSource = Source( expandedArgumentBits )
@@ -3056,6 +3188,11 @@ def analyze_functions( allFns, startname ):
             elif cc.kind() == 'subfn':
                 if cc.value() not in allFns:
                     raise Exception( 'missing lambda in %s: %s' % ( repr( dd ), repr( cc ) ) )
+                else:
+                    callgraph[ fn ].add( cc.value() )
+            elif cc.kind() == 'subcl':
+                if cc.value() not in allFns:
+                    raise Exception( 'missing closure in %s: %s' % ( repr( dd ), repr( cc ) ) )
                 else:
                     callgraph[ fn ].add( cc.value() )
             else:
@@ -3795,6 +3932,17 @@ def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetf
     else:
         return False, targetfn
 
+class Uniques:
+    def __init__(
+        self ,
+    ):
+        self._next = 0
+    
+    def get( self ):
+        v = self._next
+        self._next += 1
+        return v
+
 # returnindex + 1
 # newframe = stack + sizeof( returnframe = 16) * returnindex
 # newframe[0] = fn_0
@@ -3815,7 +3963,7 @@ def generate_code(
     code = []
     bss  = []
     
-    nns = 0
+    uniques = Uniques()
     
     bss.append( 'section .bss\n' )
     bss.append( 'datastack: resq 1\n' )
@@ -3828,6 +3976,43 @@ def generate_code(
     code.append( 'section .text\n' )
     
     code.append( 'global _start\n')
+    code.append( '\n')
+    
+    code.append( '; this trampoline is copied into the stack to enable closures\n' )
+    code.append( '; it uses position independent instruction-pointer relative load effective address\n' )
+    code.append( '; to find its jump return. it also ensures the return jump takes up the space we think it does\n' )
+    code.append( '; we copy this into a stack frame for each closure the function references\n' )
+    code.append( '; then, instead of passing the value of the closure, we pass this thing\n')
+    code.append( '; when someone goes to call the closure, it calls this, which is in the stack of the binding callframe\n')
+    code.append( '; this pushes its return address and jumps to the actual function to be called\n' )
+    code.append( '; that function then resolves any parent locals relative to the return address, as they will follow the closures\n')
+    code.append( '; this allows us to send a normal x64 points around, but one that is able to find its origin frame and locals!\n')
+    code.append( '; this will make debugging hell and make any stack corruption a hundred times worse\n')
+    code.append( '; it is perfect for kmforth\n')
+    code.append( '_trampoline:\n')
+    code.append( ' lea rax, [rel .trampoline_offset]\n')
+    code.append( '.postmov:\n' )
+    code.append( ' mov [r15], rax\n')
+    code.append( ' add r15,8\n')
+    code.append( ' jmp [r15-8]\n')
+    code.append( ' align 8\n' )
+    code.append( '.trampoline_offset:\n')
+    code.append( ' sub r15,8\n')
+    code.append( ' jmp [r15]\n')
+    code.append( ' align 8\n' )
+    code.append( 'trampoline_locals_offset equ $ - .trampoline_offset\n')
+    code.append( 'trampoline_size equ $ - _trampoline\n')
+    code.append( '\n')
+    code.append( ';%if trampoline_locals_offset != 8\n')
+    code.append( ';%error "trampoline offset is wrong"\n')
+    code.append( ';%endif\n')
+    code.append( ';%if trampoline_size != 32\n')
+    code.append( ';%error "trampoline offset is wrong"\n')
+    code.append( ';%endif\n')
+    code.append( '; end trampoline' )
+    
+    code.append( '\n' )
+    
     code.append( '_start:\n' )
     code.append( '    jmp %s\n' % startname )
     code.append( '\n')
@@ -3841,6 +4026,12 @@ def generate_code(
         
         code.append( '\n' )
         code.append( '  ' + fn + ':\n' )
+        
+        localfns = LocalFns(
+            uniques  = uniques    ,
+            functions = functions ,
+            fn        = fn        ,
+        )
         
         if functions[ fn ].body().localfns_total_size():
             code.append( '  ; make space for any locals\n' )
@@ -3871,8 +4062,7 @@ def generate_code(
                 
                 sn = stringCoalescer.lookup( command.value() )
                 if not sn:
-                    sn = "km_c_" + str(nns)
-                    nns += 1
+                    sn = "km_c_" + str(uniques.get())
                     data.append( '  ' + sn + ':\n' )
                     # convert \n into 10 here ( 10, 13 for windows, but fuck those guys
                     data.append( "    db %s\n" % asm_stringize( command.value() ) )
@@ -3897,9 +4087,11 @@ def generate_code(
                     code.append( '   mov qword [r14], %s\n' % command.value() )
                     code.append( '   add r14, 8\n' )
             
+            # user code can't create a FORWARDJUMPIF, but optimization passes can
             elif command.kind() == 'FORWARDJUMPIF':
                 code.append( INLINED_LEAVEIF % { 'endlabel' : command.value() } )
                 
+            # user code can't create a JUMPTARGET, but optimization passes can
             elif command.kind() == 'JUMPTARGET':
                 code.append( command.value() + ":\n" )
             
@@ -3908,58 +4100,15 @@ def generate_code(
                     builtin = command.value()
                     # no localfn for unconditional call, just use 'call'
                     if builtin == '$.callIf':
-                        label = '.km_nocall_' + str(nns)
-                        nns += 1
-                        code.append( '    ; callIf localfn\n' )
-                        code.append( '    sub r14, 8\n' )                  # pop todo
-                        code.append( '    mov rax, [r14]\n' )
-                        code.append( '    sub r14, 8\n' )                  # pop cond
-                        code.append( '    mov rbx, [r14]\n' )
-                        code.append( '    test rbx,rbx\n' )                # test setting zf
-                        code.append( '    jz %s\n' % label )               # jump over call if 0
-                        code.append( '    mov qword [r15], %s\n' % label ) # push return label onto callstack
-                        code.append( '    add r15, 8\n' )
-                        code.append( '    jmp rax\n' )                     # go
-                        code.append( '   %s:\n' % label )                  # return label
+                        localfns.implementation_callIf( code )
                     elif builtin == '$.jumpIf':
-                        label = '.km_nojump_' + str(nns)
-                        nns += 1
-                        code.append( '    ; jumpIf \n' )
-                        code.append( '    sub r14, 8\n' )     # pop jump target
-                        code.append( '    mov rax, [r14]\n' )
-                        code.append( '    sub r14, 8\n' )     # pop cond
-                        code.append( '    mov rbx, [r14]\n' )
-                        code.append( '    test rbx,rbx\n' )   # test cond
-                        code.append( '    jz %s\n' % label )  # jump over jump if 0
-                        code.append( '    jmp rax\n' )        # jump
-                        code.append( '   %s:\n' % label )     # don't
+                        localfns.implementation_jumpIf( code )
                     elif builtin == '$.jump':
-                        code.append( '    ; jump\n' )
-                        code.append( '    sub r14, 8\n' )
-                        code.append( '    jmp [r14]\n' )
+                        localfns.implementation_jump( code )
                     elif builtin == '$.leaveIf':
-                        label = '.km_noleave_' + str(nns)
-                        nns += 1
-                        code.append( '    ; leaveIf\n' )
-                        code.append( '    sub r14, 8\n' )
-                        code.append( '    mov rax, [r14]\n' )
-                        code.append( '    test rax,rax\n' )
-                        code.append( '    jz %s\n' % label )
-                        if functions[ fn ].body().localfns_total_size():
-                            code.append( '    ; (popping locals before leaving)\n' )
-                            code.append( '    sub r15, %d\n' % ( functions[fn].body().localfns_total_size() ) )
-                        code.append( '    sub r15, 8\n' )
-                        code.append( '    jmp [r15]\n' )
-                        code.append( '   %s:\n' % label )
+                        localfns.implementation_leaveIf( code )
                     elif builtin == '$.call':
-                        label = '.km_return_'+  str(nns)
-                        nns += 1
-                        code.append( '    ; $.call\n' )
-                        code.append( '    mov qword [r15], %s\n' % label )
-                        code.append( '    add r15, 8\n' )
-                        code.append( '    sub r14, 8\n' )
-                        code.append( '    jmp [r14]\n' )
-                        code.append( label + ':\n' )
+                        localfns.implementation_call( code )
                     elif builtin == '$.noopt':
                         # this just prevents inlining the function or inlining into the function
                         pass
@@ -3971,84 +4120,27 @@ def generate_code(
                     if len( commandBits ) != 2:
                         raise Exception( 'command-bits length not 2? %s' % repr( commandBits ) )
                     localName, memberfn = commandBits
-                    slotno = functions[ fn ].body().get_localfn_slotno( localName )
-                    if slotno == None:
-                        log( 'localName', repr( localName ) )
-                        log( 'memberfn', repr( memberfn ) )
-                        log( 'localfns', repr( functions[ fn ].body().localfns() ) )
-                        log( 'slots', repr( functions[ fn ].body()._localfnSlotNo ) )
-                        raise Exception(
-                            'failed to find local %s in function %s' % (
-                                repr( localName ) ,
-                                repr( fn )        ,
-                            )
-                        )
+                    
+                    localvar = localfns.localvar( localName )
+                    
                     if memberfn == 'get':
-                        if functions[fn].body().localfn_size( localName ) != 8:
-                            raise Exception(
-                                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                                    repr( command ) ,
-                                )
-                            )
-                        code.append( '    ; push local (%s) to datastack\n' % repr( localName ) )
-                        code.append( '    mov rax, [r15-8*%d]\n' % (slotno+1) )
-                        code.append( '    mov qword [r14], rax\n' )
-                        code.append( '    add r14, 8\n' )
+                        localvar.implementation_get( code )
                     elif memberfn == 'set':
-                        if functions[fn].body().localfn_size( localName ) != 8:
-                            raise Exception(
-                                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                                    repr( command ) ,
-                                )
-                            )
-                        code.append( '    ; pop datastack storing to local (%s)\n' % ( repr( localName ) ) )
-                        code.append( '    sub r14, 8\n' )
-                        code.append( '    mov rax, [r14]\n' )
-                        code.append( '    mov qword [r15-8*%d], rax\n' % (slotno+1) )
+                        localvar.implementation_set( code )
                     elif memberfn == 'copy':
-                        if functions[fn].body().localfn_size( localName ) != 8:
-                            raise Exception(
-                                'you can only .copy to locals of size 8. other sizes only offer .addr, found %s' % (
-                                    repr( command ) ,
-                                )
-                            )
-                        code.append( '    ; copy datastack to local (%s)\n' % ( repr( localName ) ) )
-                        code.append( '    mov rax, [14-8]\n' )
-                        code.append( '    mov qword [r15-8*%d], rax\n' % (slotno+1) )
+                        localvar.implementation_copy( code )
                     elif memberfn == 'here':
-                        if functions[fn].body().localfn_size( localName ) != 8:
-                            raise Exception(
-                                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                                    repr( command ) ,
-                                )
-                            )
-                        label = '.km_here_' + str(nns)
-                        nns += 1
-                        code.append( '    ; set local to label following this command\n' )
-                        code.append( '    mov qword [r15-8*%d], %s\n' % ( (slotno+1), label) )
-                        code.append( '    %s:\n' % label )
+                        localvar.implementation_here( code )
                     elif memberfn == 'jump':
-                        code.append( '    jmp [r15-8*%d]\n' % (slotno+1) )
+                        localvar.implementation_jump( code )
                     elif memberfn == 'jumpIf':
-                        label = '.km_dont_jumpif_' + str(nns)
-                        nns += 1
-                        code.append( '    sub r14,8\n' )
-                        code.append( '    mov rax,[r14]\n' )
-                        code.append( '    test rax,rax\n' )
-                        code.append( '    jz %s\n' % label )
-                        code.append( '    jmp [r15-8*%d]\n' % (slotno+1) )
-                        code.append( '%s:\n' % label )
+                        localvar.implementation_jumpIf( code )
                     elif memberfn == 'addr':
-                        code.append( '    ; push address of local (%s) onto stack\n' % repr( localName ) )
-                        code.append( '    lea  rax,[r15-8*%d]\n' % (slotno+1) )
-                        code.append( '    mov  [r14],rax\n' )
-                        code.append( '    add  r14,8\n' )
+                        localvar.implementation_addr( code )
                     elif memberfn == 'incr':
-                        code.append( '    ; incr local (%s) in-place\n' % repr( localName ) )
-                        code.append( '    inc qword [r15-8*%d]\n' % (slotno+1) )
+                        localvar.implementation_incr( code )
                     elif memberfn == 'decr':
-                        code.append( '    ; incr local (%s) in-place\n' % repr( localName ) )
-                        code.append( '    dec qword [r15-8*%d]\n' % (slotno+1) )
+                        localvar.implementation_decr( code )
                     else:
                         raise Exception( 'unknown localfn ( expecting <local>.get or <local>.set ): %s' % repr( command.value() ) )
                     
@@ -4062,6 +4154,17 @@ def generate_code(
                 code.append( '    mov qword [r14], %s\n' % command.value() )
                 code.append( '    add r14, 8\n' )
                 
+            elif command.kind() == 'subcl':
+                # we push a reference not to the function itself, but to the trampoline in our callstack locals
+                # the call stack must be initialized with the function to call. the function will use the return
+                # address that points back to the callstack in order to determine the offset of the variables
+                # it needs to access.
+                # 
+                # is this insane? yes. does it fit into the language perfectly? also yet.
+                
+                code.append( 'nop\n' )
+                # raise Exception( 'not yet')
+                
             else:
                 raise Exception( 'wat %s %s' % ( str( command.kind() ), repr( command.value() ) ) )
         
@@ -4073,6 +4176,230 @@ def generate_code(
         code.append( '    jmp [r15]\n' )
         
     return '\n'.join( [''.join(pre), ''.join( data ), ''.join( code ), ''.join( bss ) ] )
+    
+    
+class LocalFns:
+    def __init__(
+        self      ,
+        uniques   ,
+        functions ,
+        fn        ,
+    ):
+        self._uniques   = uniques
+        self._functions = functions
+        self._fn        = fn
+        
+        self._body      = functions[ fn ].body()
+        return
+    
+    def localvar( self, localVarName ):
+        return LocalVarFns(
+            uniques      = self._uniques   ,
+            functions    = self._functions ,
+            fn           = self._fn        ,
+            localVarName = localVarName    ,
+        )
+    
+    def implementation_callIf( self, code ):
+        label = '.km_nocall_' + str(self._uniques.get())
+        code.append( '    ; callIf localfn\n' )
+        code.append( '    sub r14, 8\n' )                  # pop todo
+        code.append( '    mov rax, [r14]\n' )
+        code.append( '    sub r14, 8\n' )                  # pop cond
+        code.append( '    mov rbx, [r14]\n' )
+        code.append( '    test rbx,rbx\n' )                # test setting zf
+        code.append( '    jz %s\n' % label )               # jump over call if 0
+        code.append( '    mov qword [r15], %s\n' % label ) # push return label onto callstack
+        code.append( '    add r15, 8\n' )
+        code.append( '    jmp rax\n' )                     # go
+        code.append( '   %s:\n' % label )                  # return label
+        
+    def implementation_jumpIf( self, code ):
+        label = '.km_nojump_' + str(self._uniques.get())
+        code.append( '    ; jumpIf \n' )
+        code.append( '    sub r14, 8\n' )     # pop jump target
+        code.append( '    mov rax, [r14]\n' )
+        code.append( '    sub r14, 8\n' )     # pop cond
+        code.append( '    mov rbx, [r14]\n' )
+        code.append( '    test rbx,rbx\n' )   # test cond
+        code.append( '    jz %s\n' % label )  # jump over jump if 0
+        code.append( '    jmp rax\n' )        # jump
+        code.append( '   %s:\n' % label )     # don't
+        
+    def implementation_jump( self, code ):
+        code.append( '    ; jump\n' )
+        code.append( '    sub r14, 8\n' )
+        code.append( '    jmp [r14]\n' )
+        
+    def implementation_leaveIf( self, code ):
+        label = '.km_noleave_' + str(self._uniques.get())
+        code.append( '    ; leaveIf\n' )
+        code.append( '    sub r14, 8\n' )
+        code.append( '    mov rax, [r14]\n' )
+        code.append( '    test rax,rax\n' )
+        code.append( '    jz %s\n' % label )
+        if self._body.localfns_total_size():
+            code.append( '    ; (popping locals before leaving)\n' )
+            code.append( '    sub r15, %d\n' % ( self._body.localfns_total_size() ) )
+        code.append( '    sub r15, 8\n' )
+        code.append( '    jmp [r15]\n' )
+        code.append( '   %s:\n' % label )
+        
+    def implementation_call( self, code ):
+        label = '.km_return_'+  str(self._uniques.get())
+        code.append( '    ; $.call\n' )
+        code.append( '    mov qword [r15], %s\n' % label )
+        code.append( '    add r15, 8\n' )
+        code.append( '    sub r14, 8\n' )
+        code.append( '    jmp [r14]\n' )
+        code.append( label + ':\n' )
+        
+
+# we don't need to care what the parent is in the code, just how many indirections
+# are required to get to a certain variable. we will then need to make usage of that
+# variable perform the correct number of parent hops and get/set/addr the local in
+# the resulting frame.
+# we always know the number of hops for a given variable, because a closer is only
+# created by having them inside other functions or closures
+# 
+class LocalVarFns:
+    def __init__(
+        self         ,
+        uniques      ,
+        functions    ,
+        fn           ,
+        localVarName ,
+    ):
+        self._uniques      = uniques
+        self._functions    = functions
+        self._fn           = fn
+        self._localVarName = localVarName
+        
+        self._slotno, self._indirections = self._determine_slotno_and_indirections()
+        return
+    
+    def _determine_slotno_and_indirections( self ):
+        indirections = 0
+        cfn = self._fn
+        while True:
+            slotno = self._functions[ cfn ].body().get_localfn_slotno( self._localVarName )
+            if slotno != None:
+                break
+            
+            cfn = self._functions[ cfn ].parent()
+            if cfn != None:
+                continue
+            else:
+                log( 'localVarName', repr( self._localVarName ) )
+                log( 'memberfn', repr( memberfn ) )
+                log( 'localfns', repr( self._functions[ self._fn ].body().localfns() ) )
+                log( 'slots', repr( self._functions[ self._fn ].body()._localfnSlotNo ) )
+                raise Exception( 'cannot locate localvar named (%s) in function (%s)' % (
+                    repr(self._localVarName),
+                    repr(self._fn),
+                ))
+        return slotno, indirections
+    
+    def implementation_get( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        if self._functions[self._fn].body().localfn_size( self._localVarName ) != 8:
+            raise Exception(
+                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                    repr( command ) ,
+                )
+            )
+        code.append( '    ; push local (%s) to datastack\n' % repr( self._localVarName ) )
+        code.append( '    mov rax, [r15-8*%d]\n' % (self._slotno+1) )
+        code.append( '    mov qword [r14], rax\n' )
+        code.append( '    add r14, 8\n' )
+        
+    def implementation_set( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        if self._functions[self._fn].body().localfn_size( self._localVarName ) != 8:
+            raise Exception(
+                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                    repr( command ) ,
+                )
+            )
+        code.append( '    ; pop datastack storing to local (%s)\n' % ( repr( self._localVarName ) ) )
+        code.append( '    sub r14, 8\n' )
+        code.append( '    mov rax, [r14]\n' )
+        code.append( '    mov qword [r15-8*%d], rax\n' % (self._slotno+1) )
+
+    def implementation_copy( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        if self._functions[self._fn].body().localfn_size( self._localVarName ) != 8:
+            raise Exception(
+                'you can only .copy to locals of size 8. other sizes only offer .addr, found %s' % (
+                    repr( command ) ,
+                )
+            )
+        code.append( '    ; copy datastack to local (%s)\n' % ( repr( self._localVarName ) ) )
+        code.append( '    mov rax, [14-8]\n' )
+        code.append( '    mov qword [r15-8*%d], rax\n' % (self._slotno+1) )
+
+    def implementation_here( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        if self._functions[self._fn].body().localfn_size( self._localVarName ) != 8:
+            raise Exception(
+                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                    repr( command ) ,
+                )
+            )
+        label = '.km_here_' + str(self._uniques.get())
+        code.append( '    ; set local to label following this command\n' )
+        code.append( '    mov qword [r15-8*%d], %s\n' % ( (self._slotno+1), label) )
+        code.append( '    %s:\n' % label )
+        
+    def implementation_jump( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        code.append( '    jmp [r15-8*%d]\n' % (self._slotno+1) )
+        
+    def implementation_jumpIf( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        label = '.km_dont_jumpif_' + str(self._uniques.get())
+        code.append( '    sub r14,8\n' )
+        code.append( '    mov rax,[r14]\n' )
+        code.append( '    test rax,rax\n' )
+        code.append( '    jz %s\n' % label )
+        code.append( '    jmp [r15-8*%d]\n' % (self._slotno+1) )
+        code.append( '%s:\n' % label )
+
+    def implementation_addr( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        code.append( '    ; push address of local (%s) onto stack\n' % repr( self._localVarName ) )
+        code.append( '    lea  rax,[r15-8*%d]\n' % (self._slotno+1) )
+        code.append( '    mov  [r14],rax\n' )
+        code.append( '    add  r14,8\n' )
+        
+    def implementation_incr( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
+        code.append( '    inc qword [r15-8*%d]\n' % (self._slotno+1) )
+
+    def implementation_decr( self, code ):
+        if self._indirections:
+            raise Exception( 'narp' )
+        
+        code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
+        code.append( '    dec qword [r15-8*%d]\n' % (self._slotno+1) )
+    
     
 def asm_stringize( ss ):
     bits      = []

@@ -83,6 +83,17 @@ def main():
         dest='startname'  ,
         default=':_start' ,
     )
+    # not guaranteed to be the same on your box!
+    parser.add_option(
+        '--trampoline-size',
+        dest='trampolineSize',
+        default='32',
+    )
+    parser.add_option(
+        '--trampoline-end-offset',
+        dest='trampolineEndOffset',
+        default='8',
+    )
     options, free = parser.parse_args()
     if len( free ) != 1:
         raise Exception( 'usage: kmforth <path/to/file/to/compile>' )
@@ -245,9 +256,11 @@ def main():
         outFns = allFns
     
     outcode = generate_code(
-        functions     = outFns    ,
-        usedFunctions = usedFns   ,
-        startname     = startname ,
+        functions           = outFns                           ,
+        usedFunctions       = usedFns                          ,
+        startname           = startname                        ,
+        trampolineSize      = int(options.trampolineSize)      ,
+        trampolineEndOffset = int(options.trampolineEndOffset) ,
     )
     
     print( outcode )
@@ -856,7 +869,7 @@ def parse_body(
     parent  ,
     uniques ,
 ):
-    localfns = parse_optional_locals( tokens )
+    localvars = parse_optional_locals( tokens )
     
     commands = []
     subfns   = []
@@ -952,11 +965,11 @@ def parse_body(
             raise Exception( 'what is %s' % repr( pt ) )
     
     return Body(
-        location = initial.location() ,
-        commands = commands           ,
-        localfns = localfns           ,
-        subfns   = subfns             ,
-        subcls   = subcls             ,
+        location  = initial.location() ,
+        commands  = commands           ,
+        localvars = localvars          ,
+        subfns    = subfns             ,
+        subcls    = subcls             ,
     )
 
 def parse_optional_locals( tokens ):
@@ -1204,6 +1217,7 @@ class Body:
             commands = new            ,
             localfns = self._localfns ,
             subfns   = self._subfns   ,
+            subcls   = self._subcls   ,
         )
     
     def rewriting_localfns( self, new ):
@@ -1212,38 +1226,25 @@ class Body:
             commands = self._commands ,
             localfns = new            ,
             subfns   = self._subfns   ,
+            subcls   = self._subcls   ,
         )
     
     def __init__(
-        self     ,
-        location ,
-        commands ,
-        localfns ,
-        subfns   ,
-        subcls   ,
+        self      ,
+        location  ,
+        commands  ,
+        localvars ,
+        subfns    ,
+        subcls    ,
     ):
-        self._location = location
-        self._commands = commands
-        self._subfns   = subfns
-        self._subcls   = subcls
-        
-        self._localfns      = localfns
-        self._localfnNames  = []
-        self._localfnSizes  = {}
-        self._localfnSlotNo = {}
-        
-        slotno = 0
-        for (name,size) in localfns:
-            
-            if size % 8 != 0:
-                raise Exception( 'implementation error: localfn size not divisible by 8: %s' % repr( (name,size) ) )
-            
-            self._localfnNames.append(name)
-            self._localfnSizes[ name ] = size
-            self._localfnSlotNo[ name ] = slotno
-            slotno += size // 8
-        
-        return
+        self._location  = location
+        self._commands  = commands
+        self._localvars = localvars
+        self._subfns    = subfns
+        self._subcls    = subcls
+    
+    def location( self ):
+        return self._location
     
     def __repr__( self ):
         return '<Definition %s command.cnt=%s>' % (
@@ -1251,38 +1252,103 @@ class Body:
             repr( len( self._commands ) ) ,
         )
     
-    def location( self ):
-        return self._location
-    
-    def commands( self ):
-        return self._commands
-    
-    def localfns( self ):
-        return self._localfns
-    
-    def localfns_names( self ):
-        return self._localfnNames
-    
-    def localfns_total_size( self ):
-        return sum( self._localfnSizes.values() )
-    
-    def localfn_size( self, name ):
-        if name not in self._localfnSizes:
-            raise Exception( 'implementation error: used name not in localfns: %s' % repr( name ) )
-        else:
-            return self._localfnSizes[ name ]
-    
     def subfns( self ):
         return self._subfns
     
     def subcls( self ):
         return self._subcls
     
-    def get_localfn_slotno(
+    def commands( self ):
+        return self._commands
+    
+    def frame_offsets(
+        self                ,
+        trampolineSize      ,
+        trampolineEndOffset ,
+    ):
+        return FrameOffsets(
+            location            = self._location      ,
+            localvars           = self._localvars     ,
+            subcls              = self._subcls        ,
+            trampolineSize      = trampolineSize      ,
+            trampolineEndOffset = trampolineEndOffset ,
+        )
+    
+    
+
+class FrameOffsets:
+    
+    def __init__(
+        self                ,
+        location            ,
+        localvars           ,
+        subcls              ,
+        trampolineSize      ,
+        trampolineEndOffset ,
+    ):
+        self._location = location
+        
+        if trampolineSize % 8 != 0:
+            raise Exception( 'trampoline-size should be align 8' )
+        
+        if trampolineEndOffset % 8 != 0:
+            raise Exception( 'trampoline-end-offset should be align 8' )
+        
+        trampolineSizeSlots = trampolineSize // 8
+        trampolineEndOffsetSlots = trampolineEndOffset // 8
+        
+        self._localvars      = localvars
+        self._localvarNames  = []
+        self._localvarSizes  = {}
+        self._localvarSlotNo = {}
+        
+        self._nonlocalvarNames            = []
+        self._nonlocalvarCount            = 0
+        self._nonlocalvarTrampolineSlotNo = {}
+        self._nonlocalvarTargetSlotNo     = {}
+        
+        slotno = 0
+        
+        for cl in subcls:
+            self._nonlocalvarNames.append( cl.name().value() )
+            self._nonlocalvarCount += 1
+            self._nonlocalvarTrampolineSlotNo[ cl.name().value() ] = slotno
+            slotno += trampolineSizeSlots
+            
+            self._nonlocalvarTargetSlotNo = slotno
+            slotno += 1
+        
+        for (name,size) in localvars:
+            if size % 8 != 0:
+                raise Exception( 'implementation error: localfn size not divisible by 8: %s' % repr( (name,size) ) )
+            else:
+                self._localvarNames.append(name)
+                self._localvarSizes[ name ] = size
+                self._localvarSlotNo[ name ] = slotno
+                slotno += size // 8
+        
+        return
+    
+    def localvars( self ):
+        return self._localvars
+    
+    def localvars_names( self ):
+        return self._localvarNames
+    
+    def localvars_total_size( self ):
+        return sum( self._localvarSizes.values() )
+    
+    def localvar_size( self, name ):
+        if name not in self._localvarSizes:
+            raise Exception( 'implementation error: used name not in localfns: %s' % repr( name ) )
+        else:
+            return self._localvarSizes[ name ]
+    
+    def localvar_slotno(
         self ,
         name ,
     ):
-        return self._localfnSlotNo.get( name, None )
+        return self._localvarSlotNo.get( name, None )
 
 def parse_include( initial, tokens, currentModule ):
     path = tokens.take()
@@ -3950,9 +4016,11 @@ class Uniques:
 # goto command
 
 def generate_code(
-    functions     ,
-    usedFunctions ,
-    startname     ,
+    functions           ,
+    usedFunctions       ,
+    startname           ,
+    trampolineSize      ,
+    trampolineEndOffset ,
 ):
     stringCoalescer = StringCoalescer()
     
@@ -3989,30 +4057,24 @@ def generate_code(
     code.append( '; this allows us to send a normal x64 points around, but one that is able to find its origin frame and locals!\n')
     code.append( '; this will make debugging hell and make any stack corruption a hundred times worse\n')
     code.append( '; it is perfect for kmforth\n')
+    code.append( ' align 64\n')
     code.append( '_trampoline:\n')
-    code.append( ' lea rax, [rel .trampoline_offset]\n')
-    code.append( '.postmov:\n' )
+    code.append( ' lea rax, [rel .trampoline_return]\n')
     code.append( ' mov [r15], rax\n')
-    code.append( ' add r15,8\n')
-    code.append( ' jmp [r15-8]\n')
+    code.append( ' add r15, 8\n')
+    code.append( ' mov rax, qword [rel .trampoline_target]\n')
+    code.append( ' jmp rax\n' )
     code.append( ' align 8\n' )
-    code.append( '.trampoline_offset:\n')
-    code.append( ' sub r15,8\n')
-    code.append( ' jmp [r15]\n')
+    code.append( '.trampoline_return:\n')
+    code.append( ' sub r15, 8\n' )
+    code.append( ' jmp [r15]\n' )
     code.append( ' align 8\n' )
-    code.append( 'trampoline_locals_offset equ $ - .trampoline_offset\n')
-    code.append( 'trampoline_size equ $ - _trampoline\n')
+    code.append( '.trampoline_target:\n')
+    code.append( 'trampoline_size equ $ - _trampoline\n' )
+    code.append( 'trampoline_end_offset equ $ - .trampoline_return\n' )
     code.append( '\n')
-    code.append( ';%if trampoline_locals_offset != 8\n')
-    code.append( ';%error "trampoline offset is wrong"\n')
-    code.append( ';%endif\n')
-    code.append( ';%if trampoline_size != 32\n')
-    code.append( ';%error "trampoline offset is wrong"\n')
-    code.append( ';%endif\n')
-    code.append( '; end trampoline' )
-    
     code.append( '\n' )
-    
+    code.append( 'align 64\n')
     code.append( '_start:\n' )
     code.append( '    jmp %s\n' % startname )
     code.append( '\n')
@@ -4028,14 +4090,21 @@ def generate_code(
         code.append( '  ' + fn + ':\n' )
         
         localfns = LocalFns(
-            uniques  = uniques    ,
-            functions = functions ,
-            fn        = fn        ,
+            uniques             = uniques             ,
+            functions           = functions           ,
+            fn                  = fn                  ,
+            trampolineSize      = trampolineSize      ,
+            trampolineEndOffset = trampolineEndOffset ,
         )
         
-        if functions[ fn ].body().localfns_total_size():
+        frameOffsets = functions[ fn ].body().frame_offsets(
+            trampolineSize      = trampolineSize      ,
+            trampolineEndOffset = trampolineEndOffset ,
+        )
+        
+        if frameOffsets.localvars_total_size():
             code.append( '  ; make space for any locals\n' )
-            code.append( '  add r15, %d\n' % ( functions[ fn ].body().localfns_total_size() ) )
+            code.append( '  add r15, %d\n' % ( frameOffsets.localvars_total_size() ) )
         
         for command in functions[ fn ].body().commands():
             
@@ -4168,9 +4237,9 @@ def generate_code(
             else:
                 raise Exception( 'wat %s %s' % ( str( command.kind() ), repr( command.value() ) ) )
         
-        if functions[ fn ].body().localfns_total_size():
+        if frameOffsets.localvars_total_size():
             code.append( '    ; pop any locals\n' )
-            code.append( '    sub r15, %d\n' % ( functions[ fn ].body().localfns_total_size() ) )
+            code.append( '    sub r15, %d\n' % ( frameOffsets.localvars_total_size() ) )
             
         code.append( '    sub r15, 8\n' )
         code.append( '    jmp [r15]\n' )
@@ -4180,24 +4249,36 @@ def generate_code(
     
 class LocalFns:
     def __init__(
-        self      ,
-        uniques   ,
-        functions ,
-        fn        ,
+        self                ,
+        uniques             ,
+        functions           ,
+        fn                  ,
+        trampolineSize      ,
+        trampolineEndOffset ,
     ):
-        self._uniques   = uniques
-        self._functions = functions
-        self._fn        = fn
+        self._uniques             = uniques
+        self._functions           = functions
+        self._fn                  = fn
+        self._trampolineSize      = trampolineSize
+        self._trampolineEndOffset = trampolineEndOffset
         
-        self._body      = functions[ fn ].body()
+        self._frameOffsets = functions[ fn ].body().frame_offsets(
+            trampolineSize      = trampolineSize      ,
+            trampolineEndOffset = trampolineEndOffset ,
+        )
+        
+        self._body = functions[ fn ].body()
         return
     
     def localvar( self, localVarName ):
         return LocalVarFns(
-            uniques      = self._uniques   ,
-            functions    = self._functions ,
-            fn           = self._fn        ,
-            localVarName = localVarName    ,
+            uniques             = self._uniques             ,
+            functions           = self._functions           ,
+            fn                  = self._fn                  ,
+            localVarName        = localVarName              ,
+            frameOffsets        = self._frameOffsets        ,
+            trampolineSize      = self._trampolineSize      ,
+            trampolineEndOffset = self._trampolineEndOffset ,
         )
     
     def implementation_callIf( self, code ):
@@ -4238,9 +4319,9 @@ class LocalFns:
         code.append( '    mov rax, [r14]\n' )
         code.append( '    test rax,rax\n' )
         code.append( '    jz %s\n' % label )
-        if self._body.localfns_total_size():
+        if self._frameOffsets.localvars_total_size():
             code.append( '    ; (popping locals before leaving)\n' )
-            code.append( '    sub r15, %d\n' % ( self._body.localfns_total_size() ) )
+            code.append( '    sub r15, %d\n' % ( self._frameOffsets.localvars_total_size() ) )
         code.append( '    sub r15, 8\n' )
         code.append( '    jmp [r15]\n' )
         code.append( '   %s:\n' % label )
@@ -4264,30 +4345,47 @@ class LocalFns:
 # 
 class LocalVarFns:
     def __init__(
-        self         ,
-        uniques      ,
-        functions    ,
-        fn           ,
-        localVarName ,
+        self                ,
+        uniques             ,
+        functions           ,
+        fn                  ,
+        localVarName        ,
+        frameOffsets        ,
+        trampolineSize      ,
+        trampolineEndOffset ,
     ):
         self._uniques      = uniques
         self._functions    = functions
         self._fn           = fn
         self._localVarName = localVarName
+        self._frameOffsets = frameOffsets
         
-        self._slotno, self._indirections = self._determine_slotno_and_indirections()
+        self._slotno, self._indirections = self._determine_slotno_and_indirections(
+            trampolineSize      = trampolineSize      ,
+            trampolineEndOffset = trampolineEndOffset ,
+        )
+        
         return
     
-    def _determine_slotno_and_indirections( self ):
+    def _determine_slotno_and_indirections(
+        self                ,
+        trampolineSize      ,
+        trampolineEndOffset ,
+    ):
         indirections = 0
         cfn = self._fn
         while True:
-            slotno = self._functions[ cfn ].body().get_localfn_slotno( self._localVarName )
+            frameOffsets = self._functions[ cfn ].body().frame_offsets(
+                trampolineSize      = trampolineSize      ,
+                trampolineEndOffset = trampolineEndOffset ,
+            )
+            slotno = frameOffsets.localvar_slotno( self._localVarName )
             if slotno != None:
                 break
             
             cfn = self._functions[ cfn ].parent()
             if cfn != None:
+                indirections += 1
                 continue
             else:
                 log( 'localVarName', repr( self._localVarName ) )
@@ -4302,9 +4400,9 @@ class LocalVarFns:
     
     def implementation_get( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:get' )
         
-        if self._functions[self._fn].body().localfn_size( self._localVarName ) != 8:
+        if self._frameOffsets.localvar_size( self._localVarName ) != 8:
             raise Exception(
                 'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
                     repr( command ) ,
@@ -4317,9 +4415,9 @@ class LocalVarFns:
         
     def implementation_set( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:set' )
         
-        if self._functions[self._fn].body().localfn_size( self._localVarName ) != 8:
+        if self._frameOffsets.localvar_size( self._localVarName ) != 8:
             raise Exception(
                 'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
                     repr( command ) ,
@@ -4332,9 +4430,9 @@ class LocalVarFns:
 
     def implementation_copy( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:copy' )
         
-        if self._functions[self._fn].body().localfn_size( self._localVarName ) != 8:
+        if self._frameOffsets.localfn_size( self._localVarName ) != 8:
             raise Exception(
                 'you can only .copy to locals of size 8. other sizes only offer .addr, found %s' % (
                     repr( command ) ,
@@ -4346,9 +4444,9 @@ class LocalVarFns:
 
     def implementation_here( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:here' )
         
-        if self._functions[self._fn].body().localfn_size( self._localVarName ) != 8:
+        if self._frameOffsets.localvar_size( self._localVarName ) != 8:
             raise Exception(
                 'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
                     repr( command ) ,
@@ -4361,13 +4459,13 @@ class LocalVarFns:
         
     def implementation_jump( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:jump' )
         
         code.append( '    jmp [r15-8*%d]\n' % (self._slotno+1) )
         
     def implementation_jumpIf( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:jumpIf' )
         
         label = '.km_dont_jumpif_' + str(self._uniques.get())
         code.append( '    sub r14,8\n' )
@@ -4379,7 +4477,7 @@ class LocalVarFns:
 
     def implementation_addr( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:addr' )
         
         code.append( '    ; push address of local (%s) onto stack\n' % repr( self._localVarName ) )
         code.append( '    lea  rax,[r15-8*%d]\n' % (self._slotno+1) )
@@ -4388,14 +4486,14 @@ class LocalVarFns:
         
     def implementation_incr( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:incr' )
         
         code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
         code.append( '    inc qword [r15-8*%d]\n' % (self._slotno+1) )
 
     def implementation_decr( self, code ):
         if self._indirections:
-            raise Exception( 'narp' )
+            raise Exception( 'narp:decr' )
         
         code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
         code.append( '    dec qword [r15-8*%d]\n' % (self._slotno+1) )

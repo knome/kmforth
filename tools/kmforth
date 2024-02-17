@@ -1303,7 +1303,6 @@ class FrameOffsets:
         self._localvarSlotNo = {}
         
         self._nonlocalvarNames            = []
-        self._nonlocalvarCount            = 0
         self._nonlocalvarTrampolineSlotNo = {}
         self._nonlocalvarTargetSlotNo     = {}
         
@@ -1311,7 +1310,6 @@ class FrameOffsets:
         
         for cl in subcls:
             self._nonlocalvarNames.append( cl.name().value() )
-            self._nonlocalvarCount += 1
             self._nonlocalvarTrampolineSlotNo[ cl.name().value() ] = slotno
             slotno += trampolineSizeSlots
             
@@ -1327,6 +1325,8 @@ class FrameOffsets:
                 self._localvarSlotNo[ name ] = slotno
                 slotno += size // 8
         
+        self._slotsUsed = slotno
+        
         return
     
     def localvars( self ):
@@ -1336,7 +1336,7 @@ class FrameOffsets:
         return self._localvarNames
     
     def localvars_total_size( self ):
-        return sum( self._localvarSizes.values() )
+        return self._slotsUsed * 8
     
     def localvar_size( self, name ):
         if name not in self._localvarSizes:
@@ -1349,6 +1349,15 @@ class FrameOffsets:
         name ,
     ):
         return self._localvarSlotNo.get( name, None )
+    
+    def nonlocalvar_names( self ):
+        return self._nonlocalvarNames
+    
+    def nonlocalvar_trampoline_slotno( self, name ):
+        return self._nonlocalvarTrampolineSlotNo.get( name, None )
+    
+    def nonlocalvar_target_slotno( self, name ):
+        return self._nonlocalvarTargetSlotNo.get( name, None )
 
 def parse_include( initial, tokens, currentModule ):
     path = tokens.take()
@@ -4103,8 +4112,33 @@ def generate_code(
         )
         
         if frameOffsets.localvars_total_size():
-            code.append( '  ; make space for any locals\n' )
+            code.append( '  ; make space for any closure trampolines and locals\n' )
             code.append( '  add r15, %d\n' % ( frameOffsets.localvars_total_size() ) )
+
+        if trampolineSize != 32:
+            raise Exception( 'need to make this general' )
+        
+        for closureName in frameOffsets.nonlocalvar_names():
+            code.append( '  mov rax, [_trampoline]\n' )
+            code.append( '  mov qword [r15-8*%d], rax\n' % (
+                frameOffsets.nonlocalvar_trampoline_slotno( closureName ) + 1,
+            ))
+            code.append( '  mov rax, [_trampoline+8]\n' )
+            code.append( '  mov qword [r15-8*%d-8], rax\n' % (
+                frameOffsets.nonlocalvar_trampoline_slotno( closureName ) + 1,
+            ))
+            code.append( '  mov rax, [_trampoline+16]\n' )
+            code.append( '  mov qword [r15-8*%d-16], rax\n' % (
+                frameOffsets.nonlocalvar_trampoline_slotno( closureName ) + 1,
+            ))
+            code.append( '  mov rax, [_trampoline+24]\n' )
+            code.append( '  mov qword [r15-8*%d-24], rax\n' % (
+                frameOffsets.nonlocalvar_trampoline_slotno( closureName ) + 1,
+            ))
+            code.append( '  mov qword [r15-8*%d], %s\n' % (
+                frameOffsets.nonlocalvar_trampoline_slotno( closureName ) + 1,
+                closureName
+            ))
         
         for command in functions[ fn ].body().commands():
             
@@ -4229,16 +4263,18 @@ def generate_code(
                 # address that points back to the callstack in order to determine the offset of the variables
                 # it needs to access.
                 # 
-                # is this insane? yes. does it fit into the language perfectly? also yet.
+                # is this insane? yes. does it fit into the language perfectly? also yes.
                 
-                code.append( 'nop\n' )
-                # raise Exception( 'not yet')
+                code.append( ' ; push subcl trampoline reference\n' )
+                code.append( ' mov qword rax, [r15-8*%d]\n' % (frameOffsets.nonlocalvar_trampoline_slotno( closureName ) + 1))
+                code.append( ' mov qword [r14], rax\n' )
+                code.append( ' add r14, 8\n' )
                 
             else:
                 raise Exception( 'wat %s %s' % ( str( command.kind() ), repr( command.value() ) ) )
         
         if frameOffsets.localvars_total_size():
-            code.append( '    ; pop any locals\n' )
+            code.append( '    ; pop any trampolines and locals\n' )
             code.append( '    sub r15, %d\n' % ( frameOffsets.localvars_total_size() ) )
             
         code.append( '    sub r15, 8\n' )

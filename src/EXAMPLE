@@ -6,18 +6,15 @@
 :main { $hello $world }
   "hello" $hello.set
   "world" $world.set
+
+  {} call
   
+#   {
+#     $hello.get print
+#     $world.get print
+#   }
+#   call
+
   $hello.get print
   $world.get print
-  
-  # { $hello.get }
-  
-  # 1
-  # {
-  #   $hello.get print
-  # }
-  # {
-  #   $world.get print
-  # }
-  # if
 ;

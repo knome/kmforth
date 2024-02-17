@@ -1,0 +1,161 @@
+
+r15 points to the unwritten tip of the callstack.
+
+An empty stack (which never happens in practice on the callstack since _start pushes a return-address)
+
+[   (nothing)  ] <- 15 points here (to slot 0, if you're unfamiliar with 0-index in programming, how did you even get here?)
+
+With normal functions and no locals, it looks like this:
+
+[  (nothing)   ] <- r15 points here
+[return-address]
+[return-address]
+[return-address]
+
+If you have normal functions and locals, it looks like this:
+
+[  (nothing)   ] <- r15 points here
+[ $someLocal   ]
+[ $otherLocal  ]
+[/            \]
+[| $biglocal  |]
+[\            /]
+[return-address]
+[ $local       ]
+[return-address]
+[return-address]
+
+There are stack manipulating functions ( call-with-stack-buffer ).
+So you cannot assume that locals will be some specific offset.
+
+So don't.
+
+With closures, things are different.
+
+We need to find the parent frame, but only have the address of
+  a function.
+  
+We are _not_ using the high 16bits to mark closures and introduce
+  a "type-check" before every call.
+
+After all, forth is a typeless language.
+
+So we pull a different trick.
+
+The parent frame adds a "trampoline".
+
+[ (nothing)    ] <- r15 points here
+[ $somelocal   ] 
+[ $closure     ] 
+[return-address] 
+[/ trampoline \] <- $closure points here
+[| code       |]
+[| written at |]
+[| runtime    |]
+[\            /]
+[ $otherlocal  ]
+[ $localler    ]
+[return-address]
+[return-addrsss]
+
+To access a non-local variable, the closure uses this stack-based trampoline.
+
+When you call the local, the value of the local doesn't point at the actual
+  function, but instead at a small piece of "trampoline code". all that code
+  does is to push its return address and then call the actual function and
+  then handle popping the callstack and jumping to the caller when returned
+  to.
+
+[   (nothing)  ] <- r15 points here
+[ $readlocal   ]
+[return-address] <- trampoline return address
+[return-address] <- closure caller return address
+[ (nothing)    ]
+[ $somelocal   ]
+[ $closure     ]
+[return-address]
+[/ trampoline \] <- $closure points here
+[| code       |] <- (code to push and jump)
+[| written at |] <- trampoline return address
+[| runtime    |] <- (code to pop and jump)
+[\            /] <- trampoline target address
+[ $otherlocal  ]
+[ $localler    ]
+[return-address]
+[return-addrsss]
+
+When you use a nonlocal in the closure, it has to find where it actually
+  is on the stack.
+
+So what we do, is we bounce through the stack on our way to calling the
+  closure's function.
+
+We can then use the return-address of the closure, which points into its
+  parent frame on the stack
+
+This bounce in an out of the stack-allocated code is the reason for the name.
+
+The trampoline itself is shaped like this:
+
+: lea rax, [rel .trampoline-return]        : # get the address of the trampoline offset using position independent code
+: mov [r15], rax                           : # push it onto the stack as a return-address
+: add r15, 8                               : #   bump the callstack as part of that
+: mov rax, qword [rel .trampoline-target]  : # get the value of the target of the trampoline (the actual function to call)
+: jmp rax                                  : # jump there
+: .trampoline-return:                      : # here is where the called function will return
+: sub r15, 8                               : # snip the top off the stack
+: jump [r15]                               : # and jump to the value that was there (the return address our caller pushed)
+: .trampoline-target                       : # a label for the position independent value load
+[ where to jump       ]                    : # the actual place we want this trampoline to go to
+< ... trampolines ... >                      # we need a trampoline _per_ closure in the function
+< ... locals ... >                           # ah, the thing we've sought the entire time! the locals at last.
+
+so when a closure is running and a non-local variable is used, what it must do is this:
+
+a closure always knows how many closures it has to hop through to get to the value it wants.
+
+A single indirection would look like this:
+
+* copy the return address of the stack-frame
+* add the offset from the return address to the local we want
+* use the calculated offset to perform whatever function we are supposed to do
+
+A triple indirection ( from a closure in a closure in a closure getting called )
+
+* copy the return-address of the stackframe
+* add the offset from the return-address to the return-address of the stackframe
+* copy the return-address of the stackframe
+* add the offset from the return-address to the return-address of the stackframe
+* copy the return-address of the stackframe
+* add the offset from the return-address to the local we want
+* use the calculated offset to perform whatever function we are supposed to do
+
+Is this nonlocal access much slower than accessing a real local?
+
+Sure.
+
+Then why?
+
+Partly because it eases programming, and most codepaths aren't hot.
+
+    : main { $hello $world }
+      "hello" $hello.set
+      "world" $world.set
+    
+      1
+      {
+        $hello.get print
+      }
+      {
+        $world.get print
+      }
+      if
+    ;
+
+But mostly just because I can.
+
+As a note, the trampoline is 32bytes on my system, with 8 bytes from return-address to where-to-jump.
+
+kmforth depends on assuming these sizes. I've made them configurable via options.
+
+You can check them by compiling something, then using `objdump -S ./a.out` to peek and see what the values are for you.

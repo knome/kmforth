@@ -19,11 +19,40 @@ define udci
   print ($r15-(unsigned long long)callstack)/8
 end
 
-define unext
-  print ""
+define wat
   stepi
-  udds
+  x/i $rip
+end
+
+define unext
+  print "STEPPING"
+  stepi
+  print "DATASTACK-INDEX"
   uddi
-  udcs
+  set $showds = ($r14-(unsigned long long)datastack)/8
+  if $showds > 0
+    print "DATASTACK"
+    udds
+  end
+  if $showds == 0
+    print "DATASTACK-EMPTY"
+  end
+  if $showds < 0
+    print "DATASTACK-UNDERFLOWING"
+  end
+  print "CALLSTACK-INDEX"
   udci
+  set $showcs = ($r15-(unsigned long long)callstack)/8
+  if $showcs > 0
+    print "CALLSTACK"
+    udcs
+  end
+  if $showcs == 0
+    print "CALLSTACK-EMPTY"
+  end
+  if $showcs < 0
+    print "CALLSTACK-UNDERFLOW"
+  end
+  print "PENDING-INSTRUCTION"
+  x/i $rip
 end

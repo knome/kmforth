@@ -3,18 +3,15 @@
 
 @ "standard" ;
 
-:main { $hello $world }
-  "hello" $hello.set
-  "world" $world.set
-
-  {} call
-  
-#   {
-#     $hello.get print
-#     $world.get print
-#   }
-#   call
-
-  $hello.get print
-  $world.get print
+:main { $A }
+  "hello" $A.set 
+  { $A.get print } bbb
 ;
+
+:bbb ccc;
+
+:ccc ddd;
+
+:ddd dup eee;
+
+:eee call call;

@@ -3,12 +3,30 @@
 
 @ "standard" ;
 
-:main { $A }
-  "no value" $A.set
+:main { $A $C $D }
+  100 $C.set
+  100 $D.set
   
-  $A.get print
-
-  { "some-value" $A.copy print } call
+  "calling" print
   
-  $A.get print
+  { { $B }
+    10 $B.set
+    "a:addr from nonlocal" print
+    $A.addr printno
+    $A.here
+    "hello" print
+    $C.decr
+    $D.incr
+    $B.decr
+    $B.get
+    $A.jumpIf
+  } call
+  
+  "back" print
+  $A.get printno
+  $C.get printno
+  $D.get printno
+  
+  "a:addr from local" print
+  $A.addr printno
 ;

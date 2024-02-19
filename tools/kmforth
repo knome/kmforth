@@ -4495,7 +4495,7 @@ class LocalVarFns:
         code.append( ' ; walking trampoline\n' )
         code.append( ' ; get return-address\n' )
         # the return address is one slot past the end of the frame
-        code.append( ' mov rax, [r15-8*%d]\n' % (self._frameOffsets.frame_total_size() + 1 ))
+        code.append( ' mov rax, [r15-8*%d]\n' % (self._frameOffsets.frame_slots_used() + 1 ))
         remaining = list( self._indirections )
         last = remaining.pop()
         for cfn in remaining:
@@ -4595,60 +4595,89 @@ class LocalVarFns:
     
     def implementation_here( self, code ):
         if self._indirections:
-            raise Exception( 'narp:here' )
-        
-        if self._frameOffsets.localvar_size( self._localVarName ) != 8:
-            raise Exception(
-                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                    repr( command ) ,
+            # 
+            # there is no reasonable reason to ever store a nonlocal here
+            # I'll allow it
+            #
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            if parentOffsets.localvar_size( self._localVarName ) != 8:
+                raise Exception(
+                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                        repr( command ) ,
+                    )
                 )
-            )
-        label = '.km_here_' + str(self._uniques.get())
-        code.append( '    ; set local to label following this command\n' )
-        code.append( '    mov qword [r15-8*%d], %s\n' % ( (self._slotno), label) )
-        code.append( '    %s:\n' % label )
+            label = '.km_here_nonlocal_' + str(self._uniques.get())
+            code.append( '    ; set local to label following this command\n' )
+            code.append( '    mov qword %s, %s\n' % (addr, label))
+            code.append( '    %s:\n' % label )
+        else:
+            if self._frameOffsets.localvar_size( self._localVarName ) != 8:
+                raise Exception(
+                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                        repr( command ) ,
+                    )
+                )
+            label = '.km_here_' + str(self._uniques.get())
+            code.append( '    ; set local to label following this command\n' )
+            code.append( '    mov qword [r15-8*%d], %s\n' % ( (self._slotno), label) )
+            code.append( '    %s:\n' % label )
         
     def implementation_jump( self, code ):
         if self._indirections:
-            raise Exception( 'narp:jump' )
-        
-        code.append( '    jmp [r15-8*%d]\n' % (self._slotno+1) )
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            code.append( '    jump %s\n' % addr )
+        else:
+            code.append( '    jmp [r15-8*%d]\n' % (self._slotno+1) )
         
     def implementation_jumpIf( self, code ):
         if self._indirections:
-            raise Exception( 'narp:jumpIf' )
-        
-        label = '.km_dont_jumpif_' + str(self._uniques.get())
-        code.append( '    sub r14,8\n' )
-        code.append( '    mov rax,[r14]\n' )
-        code.append( '    test rax,rax\n' )
-        code.append( '    jz %s\n' % label )
-        code.append( '    jmp [r15-8*%d]\n' % (self._slotno) )
-        code.append( '%s:\n' % label )
+            label = '.km_dont_jumpif_nonlocal_' + str(self._uniques.get())
+            code.append( '    sub r14,8\n' )
+            code.append( '    mov rbx,[r14]\n' )
+            code.append( '    test rbx,rbx\n' )
+            code.append( '    jz %s\n' % label )
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            code.append( '    jmp %s\n' % addr )
+            code.append( '%s:\n' % label )
+        else:
+            label = '.km_dont_jumpif_' + str(self._uniques.get())
+            code.append( '    sub r14,8\n' )
+            code.append( '    mov rax,[r14]\n' )
+            code.append( '    test rax,rax\n' )
+            code.append( '    jz %s\n' % label )
+            code.append( '    jmp [r15-8*%d]\n' % (self._slotno) )
+            code.append( '%s:\n' % label )
 
     def implementation_addr( self, code ):
         if self._indirections:
-            raise Exception( 'narp:addr' )
-        
-        code.append( '    ; push address of local (%s) onto stack\n' % repr( self._localVarName ) )
-        code.append( '    lea  rax,[r15-8*%d]\n' % (self._slotno) )
-        code.append( '    mov  [r14],rax\n' )
-        code.append( '    add  r14,8\n' )
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            code.append( '    ; push address of nonlocal (%s) onto stack\n' % repr( self._localVarName ) )
+            code.append( '    lea rax, %s\n' % addr )
+            code.append( '    mov [r14],rax\n' )
+            code.append( '    add r14,8\n' )
+        else:
+            code.append( '    ; push address of local (%s) onto stack\n' % repr( self._localVarName ) )
+            code.append( '    lea  rax,[r15-8*%d]\n' % (self._slotno) )
+            code.append( '    mov  [r14],rax\n' )
+            code.append( '    add  r14,8\n' )
         
     def implementation_incr( self, code ):
         if self._indirections:
-            raise Exception( 'narp:incr' )
-        
-        code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
-        code.append( '    inc qword [r15-8*%d]\n' % (self._slotno) )
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            code.append( '    ; incr nonlocal (%s) in-place\n' % repr( self._localVarName ) )
+            code.append( '    inc qword %s\n' % addr )
+        else:
+            code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
+            code.append( '    inc qword [r15-8*%d]\n' % (self._slotno) )
 
     def implementation_decr( self, code ):
         if self._indirections:
-            raise Exception( 'narp:decr' )
-        
-        code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
-        code.append( '    dec qword [r15-8*%d]\n' % (self._slotno) )
-    
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            code.append( '    ; decr nonlocal (%s) in-place\n' % repr( self._localVarName ) )
+            code.append( '    dec qword %s\n' % addr )
+        else:
+            code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
+            code.append( '    dec qword [r15-8*%d]\n' % (self._slotno) )
     
 def asm_stringize( ss ):
     bits      = []

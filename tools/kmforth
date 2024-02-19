@@ -4572,18 +4572,27 @@ class LocalVarFns:
 
     def implementation_copy( self, code ):
         if self._indirections:
-            raise Exception( 'narp:copy' )
-        
-        if self._frameOffsets.localfn_size( self._localVarName ) != 8:
-            raise Exception(
-                'you can only .copy to locals of size 8. other sizes only offer .addr, found %s' % (
-                    repr( command ) ,
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            if parentOffsets.localvar_size( self._localVarName ) != 8:
+                raise Exception(
+                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                        repr( command ) ,
+                    )
                 )
-            )
-        code.append( '    ; copy datastack to local (%s)\n' % ( repr( self._localVarName ) ) )
-        code.append( '    mov rax, [14-8]\n' )
-        code.append( '    mov qword [r15-8*%d], rax\n' % (self._slotno) )
-
+            code.append( '    ; copy top of datastack to nonlocal (%s)\n' % ( repr( self._localVarName ) ) )
+            code.append( '    mov rbx, [r14-8]\n' )
+            code.append( '    mov qword %s, rbx\n' % addr )
+        else:
+            if self._frameOffsets.localfn_size( self._localVarName ) != 8:
+                raise Exception(
+                    'you can only .copy to locals of size 8. other sizes only offer .addr, found %s' % (
+                        repr( command ) ,
+                    )
+                )
+            code.append( '    ; copy datastack to local (%s)\n' % ( repr( self._localVarName ) ) )
+            code.append( '    mov rax, [r14-8]\n' )
+            code.append( '    mov qword [r15-8*%d], rax\n' % (self._slotno) )
+    
     def implementation_here( self, code ):
         if self._indirections:
             raise Exception( 'narp:here' )

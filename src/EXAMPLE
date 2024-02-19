@@ -4,22 +4,11 @@
 @ "standard" ;
 
 :main { $A }
-  "no value" $A.set 
+  "no value" $A.set
   
   $A.get print
 
-  { "some-value" $A.set } bbb
+  { "some-value" $A.copy print } call
   
   $A.get print
 ;
-
-:bbb { $A }
-  "world" $A.set
-  { $A.get print } ccc
-;
-
-:ccc ddd;
-
-:ddd swap eee;
-
-:eee call call;

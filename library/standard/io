@@ -224,6 +224,9 @@
      
      $loop.here
      
+     dup 0 ==
+     [ pop "(null)" ] $.callIf        ###[: ss? "(null)" | ss? s # just handle this common error
+     
      $s.set                           ###[: ss? s # we only enter the loop when (ss.count>0)
      
      $cur.get syscall/iovec.size -    ###[: ss... (cur-sizeof(iovec))

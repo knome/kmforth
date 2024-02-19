@@ -53,9 +53,11 @@
 
 # this one has a lambda
 # the lambda just pushes the address of the lambda function onto the stack
-# inside the lambda, you can't access the outer function's local variables
-# it isn't a closure like most modern languages
-# you'll have to use the stack
+# inside the lambda, you _can_ access the outer function's local variables
+# doing this makes the lambda a closure of the 'downward funargs' variety
+# if you return a closure, you're going to have a bad time
+# pushing a closure instead pushes the address of a stack trampoline that calls the closure
+# the trampoline calls the closure, and is used to resolve nonlocal variables in it
 :main [] ;
 
 # let's actually call the lambda
@@ -77,6 +79,14 @@
 
 # much hello. very greeting.
 :main [ "hello" write ] loop ;
+
+# nonlocals are a thing
+:main { $a }
+  "narp" $a.set
+  $a.get print
+  [ "yarp" $a.set ] call
+  $a.get print
+;
 
 # works
 :main { $100.neat }

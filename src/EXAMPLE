@@ -9,7 +9,7 @@
   
   "calling" print
   
-  { { $B }
+  [ { $B }
     10 $B.set
     "a:addr from nonlocal" print
     $A.addr printno
@@ -20,7 +20,7 @@
     $B.decr
     $B.get
     $A.jumpIf
-  } call
+  ] call
   
   "back" print
   $A.get printno

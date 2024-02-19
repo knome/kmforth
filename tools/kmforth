@@ -832,33 +832,19 @@ def parse_named_function(
     )
 
 def parse_lambda_definition( initial, tokens, parent, uniques ):
-    if initial.kind() == '[':
-        name = 'kmlambda_%s' % str(uniques.get())
-        body = parse_body(
-            initial ,
-            tokens  ,
-            parent  ,
-            uniques ,
-        )
-        return LambdaFunction(
-            location   = initial.location() ,
-            lambdaName = name               ,
-            body       = body               ,
-        )
-    else:
-        name = 'kmclosure_%s' % str(uniques.get())
-        body = parse_body(
-            initial ,
-            tokens  ,
-            name    ,
-            uniques ,
-        )
-        return ClosureFunction(
-            location    = initial.location() ,
-            closureName = name               ,
-            body        = body               ,
-            parent      = parent             ,
-        )
+    name = 'kmlambda_%s' % str(uniques.get())
+    body = parse_body(
+        initial ,
+        tokens  ,
+        name    ,
+        uniques ,
+    )
+    return LambdaFunction(
+        location   = initial.location() ,
+        lambdaName = name               ,
+        body       = body               ,
+        parent     = parent             ,
+    )
 
 def parse_body(
     initial ,
@@ -878,9 +864,7 @@ def parse_body(
             break
         elif pt.kind() == ']':
             break
-        elif pt.kind() == '}':
-            raise Exception( 'unexpected "}" does not close any closing lambda at %s' % pt.location() )
-        elif pt.kind() in '[{':
+        elif pt.kind() == '[':
             tokens.take()
             subfntoks = []
             depth = []
@@ -890,23 +874,18 @@ def parse_body(
                     if len(depth):
                         raise Exception( 'unclosed %s at %s' % (repr(depth[-1].kind()), depth[-1].location()) )
                     else:
-                        raise Exception( 'unclosd %s at' % repr(repr(pt.kind()), pt.location()) )
-                elif st.kind() == ']':
-                    if len(depth) == 0:
+                        raise Exception( 'unclosed %s at %s' % (repr(pt.kind()), pt.location()))
+                elif st.kind() in ']}':
+                    if st.kind() == ']' and len(depth) == 0:
                         break
                     elif depth[-1].kind() == '[':
                         depth.pop()
                         subfntoks.append( st )
-                    else:
-                        raise Exception( 'unexpected "]" does not line up with a matching "[" at %s' % pt.location() )
-                elif st.kind() == '}':
-                    if len(depth) == 0:
-                        break
                     elif depth[-1].kind() == '{':
                         depth.pop()
                         subfntoks.append( st )
                     else:
-                        raise Exception( 'unexpected "}" does not line up with a matching "[" at %s' % pt.location() )
+                        raise Exception( 'unexpected "]" does not line up with a matching "[" at %s' % pt.location() )
                 elif st.kind() == '[':
                     depth.append(st)
                     subfntoks.append( st )
@@ -921,20 +900,12 @@ def parse_body(
                 parent  = parent              ,
                 uniques = uniques             ,
             )
-            if subfn.kind() == 'lambda':
-                subfns.append( subfn )
-                commands.append( Token(
-                    location = subfn.location()     ,
-                    kind     = 'subfn'              ,
-                    value    = subfn.name().value() ,
-                ))
-            elif subfn.kind() == 'closure':
-                subfns.append( subfn )
-                commands.append( Token(
-                    location = subfn.location()     ,
-                    kind     = 'subcl'              ,
-                    value    = subfn.name().value() ,
-                ))
+            subfns.append( subfn )
+            commands.append( Token(
+                location = subfn.location()     ,
+                kind     = 'subfn'              ,
+                value    = subfn.name().value() ,
+            ))
         
         elif pt.kind() == 'word':
             tokens.take()
@@ -1086,7 +1057,7 @@ class NamedFunction:
     def __repr__( self ):
         return '<NamedFunction name=%s commands=%s>' % (
             repr( self._name.value() ) ,
-            repr( len( self._body.commands() ) ) ,
+            repr( len( self._body.body_details(self._name.value()).commands() ) ) ,
         )
     
     def simple( self ):
@@ -1114,6 +1085,7 @@ class LambdaFunction:
         return LambdaFunction(
             location   = self._location                       ,
             lambdaName = self._lambdaName                     ,
+            parent     = self._parent                         ,
             body       = self._body.rewriting_commands( new ) ,
         )
     
@@ -1121,6 +1093,7 @@ class LambdaFunction:
         return LambdaFunction(
             location   = self._location                     ,
             lambdaName = self._lambdaName                   ,
+            parent     = self._parent                       ,
             body       = self._body.rewriting_locals( new ) ,
         )
     
@@ -1129,10 +1102,12 @@ class LambdaFunction:
         location   ,
         lambdaName ,
         body       ,
+        parent     ,
     ):
         self._location   = location
         self._lambdaName = lambdaName
         self._body       = body
+        self._parent     = parent
         return
     
     def __repr__( self ):
@@ -1146,64 +1121,16 @@ class LambdaFunction:
     
     def location ( self ): return self._location
     def body     ( self ): return self._body.body_details(self._lambdaName)
-    def parent   ( self ): return None
-    
-    def name( self ):
-        return Token(
-            location = self._location ,
-            kind   = 'word'           ,
-            value  = self._lambdaName ,
-        )
-
-class ClosureFunction:
-    
-    def rewriting_commands( self, new ):
-        return ClosureFunction(
-            location    = self._location                       ,
-            closureName = self._closureName                    ,
-            parent      = self._parent                         ,
-            body        = self._body.rewriting_commands( new ) ,
-        )
-    
-    def rewriting_locals( self, new ):
-        return ClosureFunction(
-            location    = self._location                     ,
-            closureName = self._closureName                  ,
-            parent      = self._parent                       ,
-            body        = self._body.rewriting_locals( new ) ,
-        )
-    
-    def __init__(
-        self        ,
-        location    ,
-        closureName ,
-        body        ,
-        parent      ,
-    ):
-        self._location    = location
-        self._closureName = closureName
-        self._body        = body
-        self._parent      = parent
-        return
-    
-    def __repr__( self ):
-        return '<ClosureFunction %s name=%s commands=%d>' % (
-            repr( self._location )       ,
-            self.name()                  ,
-            len( self._body.commands() ) ,
-        )
-    
-    def kind( self ): return 'closure'
-    
-    def location ( self ): return self._location
-    def body     ( self ): return self._body.body_details(self._closureName)
     def parent   ( self ): return self._parent
+        
+    def is_closure( self, functions ):
+        return self._body.body_details(self._lambdaName).is_closure( functions )
     
     def name( self ):
         return Token(
             location = self._location  ,
             kind   = 'word'            ,
-            value  = self._closureName ,
+            value  = self._lambdaName ,
         )
 
 class Body:
@@ -1270,6 +1197,26 @@ class BodyDetails:
             repr( len( self._commands ) ) ,
         )
     
+    def is_closure( self, functions ):
+        unresolvedNonLocals = list( self.unresolved_nonlocals( functions ) )
+        return bool( len( unresolvedNonLocals ) )
+    
+    def has_local(self, name):
+        return any(name == localname for localvar in self._localvars for (localname,localsize) in [localvar])
+    
+    def unresolved_nonlocals( self, functions ):
+        for command in self._commands:
+            if command.kind() == 'localfn':
+                if not command.value().startswith('$.'):
+                    name, _ = command.value().split('.',1)
+                    if not self.has_local(name):
+                        yield name
+            
+            if command.kind() == 'subfn':
+                for unresolvedNonLocal in functions[ command.value() ].body().unresolved_nonlocals( functions ):
+                    if not self.has_local(unresolvedNonLocal):
+                        yield unresolvedNonLocal
+    
     def localvars( self ):
         return self._localvars
     
@@ -1281,6 +1228,7 @@ class BodyDetails:
     
     def frame_offsets(
         self                ,
+        functions           ,
         trampolineSize      ,
         trampolineEndOffset ,
     ):
@@ -1289,11 +1237,10 @@ class BodyDetails:
             location            = self._location      ,
             localvars           = self._localvars     ,
             commands            = self._commands      ,
+            functions           = functions           ,
             trampolineSize      = trampolineSize      ,
             trampolineEndOffset = trampolineEndOffset ,
         )
-    
-    
 
 class FrameOffsets:
     
@@ -1303,6 +1250,7 @@ class FrameOffsets:
         location            ,
         localvars           ,
         commands            ,
+        functions           ,
         trampolineSize      ,
         trampolineEndOffset ,
     ):
@@ -1347,24 +1295,24 @@ class FrameOffsets:
                     self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += size // 8
         
         for cc in commands:
-            if cc.kind() == 'subcl':
-                
-                slotno += 1
-                
-                self._nonlocalvarTargetSlotNo[cc.value()] = slotno
-                
-                slotno += trampolineSizeSlots
-                
-                self._nonlocalvarNames.append( cc.value() )
-                self._nonlocalvarTrampolineSlotNo[ cc.value() ] = slotno
-                
-                for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
-                    self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += trampolineSizeSlots
-                
-                for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
-                    self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += 1
-                
-                self._nonlocalvarNumSlotsUsedAfterNonLocal[ cc.value() ] = 0
+            if cc.kind() == 'subfn':
+                if functions[ cc.value() ].is_closure( functions ):
+                    slotno += 1
+                    
+                    self._nonlocalvarTargetSlotNo[cc.value()] = slotno
+                    
+                    slotno += trampolineSizeSlots
+                    
+                    self._nonlocalvarNames.append( cc.value() )
+                    self._nonlocalvarTrampolineSlotNo[ cc.value() ] = slotno
+                    
+                    for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
+                        self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += trampolineSizeSlots
+                    
+                    for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
+                        self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += 1
+                    
+                    self._nonlocalvarNumSlotsUsedAfterNonLocal[ cc.value() ] = 0
         
         self._slotsUsed = slotno
         
@@ -3315,11 +3263,6 @@ def analyze_functions( allFns, startname ):
                     raise Exception( 'missing lambda in %s: %s' % ( repr( dd ), repr( cc ) ) )
                 else:
                     callgraph[ fn ].add( cc.value() )
-            elif cc.kind() == 'subcl':
-                if cc.value() not in allFns:
-                    raise Exception( 'missing closure in %s: %s' % ( repr( dd ), repr( cc ) ) )
-                else:
-                    callgraph[ fn ].add( cc.value() )
             else:
                 raise Exception( 'unexpected command form: %s' % repr( cc ) )
     
@@ -3480,9 +3423,6 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
             if (yield command.value()):
                 recursive.add( command.value() )
         elif command.kind() == 'subfn':
-            if (yield command.value()):
-                recursive.add( command.value() )
-        elif command.kind() == 'subcl':
             if (yield command.value()):
                 recursive.add( command.value() )
         elif command.kind() == 'localfn':
@@ -4158,6 +4098,7 @@ def generate_code(
         )
         
         frameOffsets = functions[ fn ].body().frame_offsets(
+            functions           = functions           ,
             trampolineSize      = trampolineSize      ,
             trampolineEndOffset = trampolineEndOffset ,
         )
@@ -4306,23 +4247,17 @@ def generate_code(
                 code.append( '    add r14, 8\n' )
                 
             elif command.kind() == 'subfn':
-                code.append( '    ; push subfn reference\n' )
-                code.append( '    mov qword [r14], %s\n' % command.value() )
-                code.append( '    add r14, 8\n' )
-                
-            elif command.kind() == 'subcl':
-                # we push a reference not to the function itself, but to the trampoline in our callstack locals
-                # the call stack must be initialized with the function to call. the function will use the return
-                # address that points back to the callstack in order to determine the offset of the variables
-                # it needs to access.
-                # 
-                # is this insane? yes. does it fit into the language perfectly? also yes.
-                
-                code.append( ' ; push subcl trampoline reference\n' )
-                code.append( ' lea rax, [r15-8*%d]\n' % (frameOffsets.nonlocalvar_trampoline_slotno( closureName ),))
-                code.append( ' mov qword [r14], rax\n' )
-                code.append( ' add r14, 8\n' )
-                
+                if functions[ command.value() ].is_closure( functions ):
+                    # needs a trampoline for nonlocal access
+                    code.append( ' ; push closure subfn trampoline reference\n' )
+                    code.append( ' lea rax, [r15-8*%d]\n' % (frameOffsets.nonlocalvar_trampoline_slotno( closureName ),))
+                    code.append( ' mov qword [r14], rax\n' )
+                    code.append( ' add r14, 8\n' )
+                else:
+                    # normal c-style function pointer
+                    code.append( '    ; push subfn reference\n' )
+                    code.append( '    mov qword [r14], %s\n' % command.value() )
+                    code.append( '    add r14, 8\n' )
             else:
                 raise Exception( 'wat %s %s' % ( str( command.kind() ), repr( command.value() ) ) )
         
@@ -4353,6 +4288,7 @@ class LocalFns:
         self._trampolineEndOffset = trampolineEndOffset
         
         self._frameOffsets = functions[ fn ].body().frame_offsets(
+            functions           = functions           ,
             trampolineSize      = trampolineSize      ,
             trampolineEndOffset = trampolineEndOffset ,
         )
@@ -4468,6 +4404,7 @@ class LocalVarFns:
         cfn = self._fn
         while True:
             frameOffsets = self._functions[ cfn ].body().frame_offsets(
+                functions           = self._functions     ,
                 trampolineSize      = trampolineSize      ,
                 trampolineEndOffset = trampolineEndOffset ,
             )
@@ -4481,10 +4418,6 @@ class LocalVarFns:
             if cfn != None:
                 continue
             else:
-                log( 'localVarName', repr( self._localVarName ) )
-                log( 'memberfn', repr( memberfn ) )
-                log( 'localfns', repr( self._functions[ self._fn ].body().localfns() ) )
-                log( 'slots', repr( self._functions[ self._fn ].body()._localfnSlotNo ) )
                 raise Exception( 'cannot locate localvar named (%s) in function (%s)' % (
                     repr(self._localVarName),
                     repr(self._fn),
@@ -4498,24 +4431,29 @@ class LocalVarFns:
         code.append( ' mov rax, [r15-8*%d]\n' % (self._frameOffsets.frame_slots_used() + 1 ))
         remaining = list( self._indirections )
         last = remaining.pop()
+        penultimate = self._fn
         for cfn in remaining:
             parentFrameOffsets = self._functions[ cfn ].body().frame_offsets(
+                functions           = self._functions           ,
                 trampolineSize      = self._trampolineSize      ,
                 trampolineEndOffset = self._trampolineEndOffset ,
             )
             code.append( ' ; get next return-address\n' )
-            code.append( ' add rax, [rax-8*%d+%d]\n' % (
-                parentFrameOffsets.nonlocalvar_slots_used_after( cfn ), # OFFBYONE !?
+            code.append( ' add rax, [rax-8*%d+%d-%d]\n' % (
+                parentFrameOffsets.nonlocalvar_slots_used_after( penultimate ),
                 self._trampolineEndOffset ,
+                parentFrameOffsets.frame_total_size() + 8
             ))
+            penultimate = cfn
         lastFrameOffsets = self._functions[ last ].body().frame_offsets(
+            functions           = self._functions           ,
             trampolineSize      = self._trampolineSize      ,
             trampolineEndOffset = self._trampolineEndOffset ,
         )
         return last, lastFrameOffsets, '[rax+8*%d]' % (
             + (self._trampolineEndOffset // 8)
             - (self._trampolineSize // 8)
-            + lastFrameOffsets.nonlocalvar_trampoline_slotno( self._fn )
+            + lastFrameOffsets.nonlocalvar_trampoline_slotno( penultimate )
             - lastFrameOffsets.localvar_slotno( self._localVarName )
         )
     

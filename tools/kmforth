@@ -198,9 +198,6 @@ def main():
                             
                             for subfn in fn.body().subfns():
                                 fns.append( subfn )
-                                
-                            for subcl in fn.body().subcls():
-                                fns.append( subcl )
                 
                 elif definition.definition_type() == 'include':
                     # includes can be specified all over
@@ -873,7 +870,6 @@ def parse_body(
     
     commands = []
     subfns   = []
-    subcls   = []
     while True:
         pt = tokens.peek()
         if not pt:
@@ -933,7 +929,7 @@ def parse_body(
                     value    = subfn.name().value() ,
                 ))
             elif subfn.kind() == 'closure':
-                subcls.append( subfn )
+                subfns.append( subfn )
                 commands.append( Token(
                     location = subfn.location()     ,
                     kind     = 'subcl'              ,
@@ -969,7 +965,6 @@ def parse_body(
         commands  = commands           ,
         localvars = localvars          ,
         subfns    = subfns             ,
-        subcls    = subcls             ,
     )
 
 def parse_optional_locals( tokens ):
@@ -1070,11 +1065,11 @@ class NamedFunction:
             body     = self._body.rewriting_commands( new ) ,
         )
     
-    def rewriting_localfns( self, new ):
+    def rewriting_locals( self, new ):
         return NamedFunction(
-            location = self._location                       ,
-            name     = self._name                           ,
-            body     = self._body.rewriting_localfns( new ) ,
+            location = self._location                     ,
+            name     = self._name                         ,
+            body     = self._body.rewriting_locals( new ) ,
         )
     
     def __init__(
@@ -1122,11 +1117,11 @@ class LambdaFunction:
             body       = self._body.rewriting_commands( new ) ,
         )
     
-    def rewriting_localfns( self, new ):
+    def rewriting_locals( self, new ):
         return LambdaFunction(
-            location    = self._location                       ,
-            lambdaNname = self._lambdaName                     ,
-            body        = self._body.rewriting_localfns( new ) ,
+            location   = self._location                     ,
+            lambdaName = self._lambdaName                   ,
+            body       = self._body.rewriting_locals( new ) ,
         )
     
     def __init__(
@@ -1166,14 +1161,16 @@ class ClosureFunction:
         return ClosureFunction(
             location    = self._location                       ,
             closureName = self._closureName                    ,
+            parent      = self._parent                         ,
             body        = self._body.rewriting_commands( new ) ,
         )
     
-    def rewriting_localfns( self, new ):
+    def rewriting_locals( self, new ):
         return ClosureFunction(
-            location    = self._location                       ,
-            closureName = self._closureName                    ,
-            body        = self._body.rewriting_localfns( new ) ,
+            location    = self._location                     ,
+            closureName = self._closureName                  ,
+            parent      = self._parent                       ,
+            body        = self._body.rewriting_locals( new ) ,
         )
     
     def __init__(
@@ -1213,20 +1210,18 @@ class Body:
     
     def rewriting_commands( self, new ):
         return Body(
-            location = self._location ,
-            commands = new            ,
-            localfns = self._localfns ,
-            subfns   = self._subfns   ,
-            subcls   = self._subcls   ,
+            location  = self._location  ,
+            commands  = new             ,
+            localvars = self._localvars ,
+            subfns    = self._subfns    ,
         )
     
-    def rewriting_localfns( self, new ):
+    def rewriting_locals( self, new ):
         return Body(
-            location = self._location ,
-            commands = self._commands ,
-            localfns = new            ,
-            subfns   = self._subfns   ,
-            subcls   = self._subcls   ,
+            location  = self._location ,
+            commands  = self._commands ,
+            localvars = new            ,
+            subfns    = self._subfns   ,
         )
     
     def __init__(
@@ -1235,13 +1230,11 @@ class Body:
         commands  ,
         localvars ,
         subfns    ,
-        subcls    ,
     ):
         self._location  = location
         self._commands  = commands
         self._localvars = localvars
         self._subfns    = subfns
-        self._subcls    = subcls
         
     def body_details( self, name ):
         return BodyDetails(
@@ -1250,7 +1243,6 @@ class Body:
             commands  = self._commands  ,
             localvars = self._localvars ,
             subfns    = self._subfns    ,
-            subcls    = self._subcls    ,
         )
         
 class BodyDetails:
@@ -1262,14 +1254,12 @@ class BodyDetails:
         commands  ,
         localvars ,
         subfns    ,
-        subcls    ,
     ):
         self._name      = name
         self._location  = location
         self._commands  = commands
         self._localvars = localvars
         self._subfns    = subfns
-        self._subcls    = subcls
     
     def location( self ):
         return self._location
@@ -1280,11 +1270,11 @@ class BodyDetails:
             repr( len( self._commands ) ) ,
         )
     
+    def localvars( self ):
+        return self._localvars
+    
     def subfns( self ):
         return self._subfns
-    
-    def subcls( self ):
-        return self._subcls
     
     def commands( self ):
         return self._commands
@@ -1298,7 +1288,7 @@ class BodyDetails:
             name                = self._name          ,
             location            = self._location      ,
             localvars           = self._localvars     ,
-            subcls              = self._subcls        ,
+            commands            = self._commands      ,
             trampolineSize      = trampolineSize      ,
             trampolineEndOffset = trampolineEndOffset ,
         )
@@ -1312,7 +1302,7 @@ class FrameOffsets:
         name                ,
         location            ,
         localvars           ,
-        subcls              ,
+        commands            ,
         trampolineSize      ,
         trampolineEndOffset ,
     ):
@@ -1356,24 +1346,25 @@ class FrameOffsets:
                 for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
                     self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += size // 8
         
-        for cl in subcls:
-            
-            slotno += 1
-            
-            self._nonlocalvarTargetSlotNo[cl.name().value()] = slotno
-            
-            slotno += trampolineSizeSlots
-            
-            self._nonlocalvarNames.append( cl.name().value() )
-            self._nonlocalvarTrampolineSlotNo[ cl.name().value() ] = slotno
-            
-            for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
-                self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += trampolineSizeSlots
-            
-            for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
-                self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += 1
-            
-            self._nonlocalvarNumSlotsUsedAfterNonLocal[ cl.name().value() ] = 0
+        for cc in commands:
+            if cc.kind() == 'subcl':
+                
+                slotno += 1
+                
+                self._nonlocalvarTargetSlotNo[cc.value()] = slotno
+                
+                slotno += trampolineSizeSlots
+                
+                self._nonlocalvarNames.append( cc.value() )
+                self._nonlocalvarTrampolineSlotNo[ cc.value() ] = slotno
+                
+                for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
+                    self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += trampolineSizeSlots
+                
+                for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
+                    self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += 1
+                
+                self._nonlocalvarNumSlotsUsedAfterNonLocal[ cc.value() ] = 0
         
         self._slotsUsed = slotno
         
@@ -3491,6 +3482,9 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
         elif command.kind() == 'subfn':
             if (yield command.value()):
                 recursive.add( command.value() )
+        elif command.kind() == 'subcl':
+            if (yield command.value()):
+                recursive.add( command.value() )
         elif command.kind() == 'localfn':
             pass
         elif command.kind() == 'integer':
@@ -3662,8 +3656,8 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
     
     changed = False
     
-    for localfn in targetfn.body().localfns():
-        newlocals.append( localfn )
+    for localvar in targetfn.body().localvars():
+        newlocals.append( localvar )
     
     for command in targetfn.body().commands():
         
@@ -3743,7 +3737,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                     end = '.' + vv + '.' + str(inlineno) + '.inline.end'
                     includeEndLabel = False
                     
-                    for sublocal in opted[vv].body().localfns():
+                    for sublocal in opted[vv].body().localvars():
                         newlocals.append( ('$' + vv + '$' + str(inlineno) + sublocal[0], sublocal[1] ) )
                     
                     for subcommand in opted[vv].body().commands():
@@ -3793,7 +3787,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
             rewritten.append( command )
     
     if changed:
-        return True, targetfn.rewriting_localfns( newlocals ).rewriting_commands( rewritten )
+        return True, targetfn.rewriting_locals( newlocals ).rewriting_commands( rewritten )
     else:
         return False, targetfn
 
@@ -4553,18 +4547,28 @@ class LocalVarFns:
         
     def implementation_set( self, code ):
         if self._indirections:
-            raise Exception( 'narp:set' )
-        
-        if self._frameOffsets.localvar_size( self._localVarName ) != 8:
-            raise Exception(
-                'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                    repr( command ) ,
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            if parentOffsets.localvar_size( self._localVarName ) != 8:
+                raise Exception(
+                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                        repr( command ) ,
+                    )
                 )
-            )
-        code.append( '    ; pop datastack storing to local (%s)\n' % ( repr( self._localVarName ) ) )
-        code.append( '    sub r14, 8\n' )
-        code.append( '    mov rax, [r14]\n' )
-        code.append( '    mov qword [r15-8*%d], rax\n' % (self._slotno) )
+            code.append( '    ; pop datastack storing to nonlocal (%s)\n' % repr( self._localVarName ))
+            code.append( '    sub r14, 8\n')
+            code.append( '    mov rbx, [r14]\n' )
+            code.append( '    mov qword %s, rbx\n' % addr )
+        else:
+            if self._frameOffsets.localvar_size( self._localVarName ) != 8:
+                raise Exception(
+                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
+                        repr( command ) ,
+                    )
+                )
+            code.append( '    ; pop datastack storing to local (%s)\n' % ( repr( self._localVarName ) ) )
+            code.append( '    sub r14, 8\n' )
+            code.append( '    mov rax, [r14]\n' )
+            code.append( '    mov qword [r15-8*%d], rax\n' % (self._slotno) )
 
     def implementation_copy( self, code ):
         if self._indirections:

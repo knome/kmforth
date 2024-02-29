@@ -3,30 +3,59 @@
 
 @ "standard" ;
 
-:main { $A $C $D }
-  100 $C.set
-  100 $D.set
-  
-  "calling" print
-  
-  [ { $B }
-    10 $B.set
-    "a:addr from nonlocal" print
-    $A.addr printno
-    $A.here
-    "hello" print
-    $C.decr
-    $D.incr
-    $B.decr
-    $B.get
-    $A.jumpIf
-  ] call
-  
-  "back" print
-  $A.get printno
-  $C.get printno
-  $D.get printno
-  
-  "a:addr from local" print
-  $A.addr printno
+# :main { $A $B }
+#   
+#   0 pop
+#   
+#   [ { $escape }
+#   
+#     $escape.set
+# 
+#     1 pop
+#   
+#     $escape.get call
+# 
+#     2 pop
+#   
+#   ]
+#   
+#   $B.set
+#   
+#   $B.get stack/with-escape
+#   
+#   3 pop
+#   
+# ;
+
+:main { $A }
+    
+    [ { $escape }
+      
+      $escape.set
+      
+      0 $A.set
+      [
+        # "hello" print
+        # $A.get printno
+        
+        $A.get 1 + $A.set
+        
+        $A.get 200 >
+        [ $escape.get call ]
+        when
+      
+      ] recursor
+    ] stack/with-escape
+    
+    "wat" print
+    $A.get printno
+;
+
+# a simple infinite self-recurser that calls another function every frame deeper it gets
+#
+#[ <fn/0>
+#[ 
+:recursor
+  dup call
+  recursor
 ;

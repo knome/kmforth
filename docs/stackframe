@@ -66,23 +66,25 @@ When you call the local, the value of the local doesn't point at the actual
   then handle popping the callstack and jumping to the caller when returned
   to.
 
-[   (nothing)  ] <- r15 points here
-[ $readlocal   ]
-[return-address] <- trampoline return address
-[return-address] <- closure caller return address
-[ (nothing)    ]
-[ $somelocal   ]
-[ $closure     ]
-[return-address]
-[/ trampoline \] <- $closure points here
-[| code       |] <- (code to push and jump)
-[| written at |] <- trampoline return address
-[| runtime    |] <- (code to pop and jump)
-[\            /] <- trampoline target address
-[ $otherlocal  ]
-[ $localler    ]
-[return-address]
-[return-addrsss]
+Every line of the following is 8 bytes. We're assuming a 64bit pointer platform, so a pointer is 8 bytes.
+
+    [   (nothing)  ] <- r15 points here
+    [ $readlocal   ]
+    [return-address] <- trampoline return address
+    [return-address] <- closure caller return address
+ +  [ (nothing)    ]
+ |  [ $somelocal   ]
+ r  [ $closure     ]
+ d  [return-address]
+ d  [ $otherlocal  ]
+ a  [ $localler    ]
+ |  [/ trampoline \] <- trampoline target address
+ -  [| code       |] <- (code to pop and jump)
+    [| written at |] <- trampoline return address
+    [| runtime    |] <- (code to push and jump)
+    [\            /] <- $closure points here
+    [return-address]
+    [return-addrsss]
 
 When you use a nonlocal in the closure, it has to find where it actually
   is on the stack.
@@ -159,3 +161,27 @@ As a note, the trampoline is 32bytes on my system, with 8 bytes from return-addr
 kmforth depends on assuming these sizes. I've made them configurable via options.
 
 You can check them by compiling something, then using `objdump -S ./a.out` to peek and see what the values are for you.
+
+=========
+ 
+ Model I used to visualize offsets while debugging the mechanism
+
+
+ stack-bottom               | 00000000 | return-address | > frame+3
+                            | 00000008 | return-address | \
+ trampoline enter addr ->   | 00000016 | //trampoline\\ | :
+                            | 00000024 | ::enter and :: | :
+                            | 00000032 | :\jump      /: | :
+ trampoline return addr ->  | 00000040 | \< (return) >/ | :
+ trampoline targetfn ->     | 00000048 | <trmp. target> | :
+ other locals ->            | 00000056 | $LocalC        | :
+                            | 00000064 | $LocalB        | :
+                            | 00000072 | $LocalA        | / frame+2
+ r15-base for frame w/ trmp | 00000080 | return-address | \
+                            | 00000088 | $OtherLocalA   | / frame+1
+                            | 00000096 | return-address | \
+                            | 00000104 | $currentLocalC | :
+                            | 00000112 | $currentLocalB | :
+                            | 00000120 | $currentLocalA | / top frame
+ r15 points here ->         | 00000128 | (nothing)      |
+              

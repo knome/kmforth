@@ -89,6 +89,81 @@
   `
 ;
 
+# the following two functions are exclusively for malicious usage
+
+# grabs a pointer to where the callstack of the caller ends
+# 
+:stack/callstack.get
+  `
+  mov qword [r14], r15 ; grab the pointer to where the callstack ends in this function
+  sub qword [r14], 8   ; walk it back to where it ends in the caller
+  add r14, 8           ; bump the datastack to complete adding the pointer to it
+  `
+;
+
+# restore the callstack to point at a prior grabbed location
+# manually return to the one requesting the callstack change since moving the callstack
+# breaks the normal return semantics
+# 
+:stack/callstack.set
+  `
+  mov rax, [r15-8] ; since we're nuking the callstack, we have to manually return to the caller
+  sub r14, 8       ; set the value of the current callstack
+  mov r15, [r14]   ;
+  jmp rax          ; avoid the normal "sub [r15],8; jmp [r15]" at the end of the function
+  `
+;
+
+
+# if we also add a stack/datastack.{get,set}, we can use the combination with callstack.{get,set}
+# to create a far-return/exception-like capability
+
+
+# todo
+# (calls '&escapefn todo')
+# (
+#   calling 'escapefn' within 'todo' immediately reverts the callstack
+#   back to where it was when with-escape was entered and then exits
+#   from with-escape. the consistency of the datastack is the responsibility
+#   of the person foolish enough to use this mechanism.
+# )
+# 
+:stack/with-escape 
+  {
+    $todo
+    $escapefn
+    $callstack
+    $return
+    $call
+  }
+  
+  $todo.set
+  
+  stack/callstack.get $callstack.set
+  
+  # the 'escape' function
+  [
+      # restore the previous callstack
+      # jump directly from wherever we are back there
+      # lmao
+      $return.get # grab this first because setting the callstack nukes variables
+      $callstack.get stack/callstack.set
+      $.jump
+  ]
+  $escapefn.set
+  
+  1 $call.set
+  
+  $return.here
+  
+  # call the todo the first time, but not on return
+  # 
+  $call.get
+  0 $call.set
+  [ $escapefn.get $todo.get call ]
+  when
+;
+
 :call
   $.call
   ;

@@ -1071,6 +1071,7 @@ class NamedFunction:
     
     def location ( self ): return self._location
     def body     ( self ): return self._body.body_details(self._name.value())
+    def parent   ( self ): return None
     
     def name( self ):
         return Token(
@@ -1114,7 +1115,7 @@ class LambdaFunction:
         return '<LambdaFunction %s name=%s commands=%d>' % (
             repr( self._location )       ,
             self.name()                  ,
-            len( self._body.commands() ) ,
+            len( self._body.body_details(self._lambdaName).commands() ) ,
         )
     
     def kind( self ): return 'lambda'
@@ -1273,7 +1274,7 @@ class FrameOffsets:
         self._nonlocalvarNames                     = []
         self._nonlocalvarTrampolineSlotNo          = {}
         self._nonlocalvarTargetSlotNo              = {}
-        self._nonlocalvarNumSlotsUsedAfterNonLocal = {}
+        self._nonlocalvarNumSlotsUsedAfterNonLocal = None
         
         # slotno is hereby defined as negative slot index to start of data from r15 cursor (which sites 1 slot past data)
         # therefore, all slots must begin at 1 and go up
@@ -1291,12 +1292,15 @@ class FrameOffsets:
                 self._localvarSizes[ localname ] = size
                 self._localvarSlotNo[ localname ] = slotno
                 
-                for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
-                    self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += size // 8
-        
         for cc in commands:
             if cc.kind() == 'subfn':
                 if functions[ cc.value() ].is_closure( functions ):
+                    
+                    # slotnos are negative into the frame from r15
+                    # data still points forwards, however.
+                    # so for something to found immediately after something else's data
+                    # it needs to be pushed immediately before that something
+                    
                     slotno += 1
                     
                     self._nonlocalvarTargetSlotNo[cc.value()] = slotno
@@ -1306,14 +1310,6 @@ class FrameOffsets:
                     self._nonlocalvarNames.append( cc.value() )
                     self._nonlocalvarTrampolineSlotNo[ cc.value() ] = slotno
                     
-                    for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
-                        self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += trampolineSizeSlots
-                    
-                    for k in self._nonlocalvarNumSlotsUsedAfterNonLocal.keys():
-                        self._nonlocalvarNumSlotsUsedAfterNonLocal[k] += 1
-                    
-                    self._nonlocalvarNumSlotsUsedAfterNonLocal[ cc.value() ] = 0
-        
         self._slotsUsed = slotno
         
         return
@@ -4087,6 +4083,7 @@ def generate_code(
             continue
         
         code.append( '\n' )
+        code.append( '; %s\n' % repr( functions[fn].location() ) )
         code.append( '  ' + fn + ':\n' )
         
         localfns = LocalFns(
@@ -4249,8 +4246,8 @@ def generate_code(
             elif command.kind() == 'subfn':
                 if functions[ command.value() ].is_closure( functions ):
                     # needs a trampoline for nonlocal access
-                    code.append( ' ; push closure subfn trampoline reference\n' )
-                    code.append( ' lea rax, [r15-8*%d]\n' % (frameOffsets.nonlocalvar_trampoline_slotno( closureName ),))
+                    code.append( ' ; for subfn, push closure (%s) trampoline reference\n' % repr( command.value() ))
+                    code.append( ' lea rax, [r15+8*%d]\n' % (- frameOffsets.nonlocalvar_trampoline_slotno( command.value())))
                     code.append( ' mov qword [r14], rax\n' )
                     code.append( ' add r14, 8\n' )
                 else:
@@ -4428,7 +4425,10 @@ class LocalVarFns:
         code.append( ' ; walking trampoline\n' )
         code.append( ' ; get return-address\n' )
         # the return address is one slot past the end of the frame
-        code.append( ' mov rax, [r15-8*%d]\n' % (self._frameOffsets.frame_slots_used() + 1 ))
+        code.append( ' mov rax, [r15+8*%d+8*%d]\n' % (
+            - self._frameOffsets.frame_slots_used(),
+            - 1
+        ))
         remaining = list( self._indirections )
         last = remaining.pop()
         penultimate = self._fn
@@ -4439,10 +4439,12 @@ class LocalVarFns:
                 trampolineEndOffset = self._trampolineEndOffset ,
             )
             code.append( ' ; get next return-address\n' )
-            code.append( ' add rax, [rax-8*%d+%d-%d]\n' % (
-                parentFrameOffsets.nonlocalvar_slots_used_after( penultimate ),
-                self._trampolineEndOffset ,
-                parentFrameOffsets.frame_total_size() + 8
+            code.append( ' mov rax, [rax+8*%d+8*%d+8*%d+8*%d+8*%d]\n' % (
+                + (self._trampolineEndOffset // 8),
+                - (self._trampolineSize // 8),
+                + parentFrameOffsets.nonlocalvar_trampoline_slotno( penultimate ),
+                - parentFrameOffsets.frame_slots_used(),
+                - 1,
             ))
             penultimate = cfn
         lastFrameOffsets = self._functions[ last ].body().frame_offsets(
@@ -4450,13 +4452,13 @@ class LocalVarFns:
             trampolineSize      = self._trampolineSize      ,
             trampolineEndOffset = self._trampolineEndOffset ,
         )
-        return last, lastFrameOffsets, '[rax+8*%d]' % (
-            + (self._trampolineEndOffset // 8)
-            - (self._trampolineSize // 8)
-            + lastFrameOffsets.nonlocalvar_trampoline_slotno( penultimate )
-            - lastFrameOffsets.localvar_slotno( self._localVarName )
+        return last, lastFrameOffsets, '[rax+8*%d+8*%d+8*%d+8*%d]' % (
+                + (self._trampolineEndOffset // 8),
+                - (self._trampolineSize // 8),
+                + lastFrameOffsets.nonlocalvar_trampoline_slotno( penultimate ),
+                - lastFrameOffsets.localvar_slotno( self._localVarName ),
         )
-    
+
     def implementation_get( self, code ):
         if self._indirections:
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
@@ -4545,7 +4547,7 @@ class LocalVarFns:
                     )
                 )
             label = '.km_here_nonlocal_' + str(self._uniques.get())
-            code.append( '    ; set local to label following this command\n' )
+            code.append( '    ; set local (%s) to label following this command\n' % repr(self._localVarName) )
             code.append( '    mov qword %s, %s\n' % (addr, label))
             code.append( '    %s:\n' % label )
         else:
@@ -4556,7 +4558,7 @@ class LocalVarFns:
                     )
                 )
             label = '.km_here_' + str(self._uniques.get())
-            code.append( '    ; set local to label following this command\n' )
+            code.append( '    ; set local (%s) to label following this command\n' % repr(self._localVarName))
             code.append( '    mov qword [r15-8*%d], %s\n' % ( (self._slotno), label) )
             code.append( '    %s:\n' % label )
         

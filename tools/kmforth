@@ -4567,7 +4567,7 @@ class LocalVarFns:
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
             code.append( '    jump %s\n' % addr )
         else:
-            code.append( '    jmp [r15-8*%d]\n' % (self._slotno+1) )
+            code.append( '    jmp [r15+8*%d]\n' % (- self._slotno) )
         
     def implementation_jumpIf( self, code ):
         if self._indirections:

@@ -97,6 +97,7 @@
   [
     $src.get $thus.get + memory/peek-b #[: src[index]
     $dst.get $thus.get + memory/poke-b #[: (set dst[index])
+    [1 +] $thus.update
   ]
   while
 ;

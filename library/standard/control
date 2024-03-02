@@ -32,6 +32,19 @@
   # done
 ;
 
+# (like C until, executes body before checking cond, rather than cond first)
+# [: todo cond
+# 
+:until { $cond $todo $retry }
+  $cond.set
+  $todo.set
+  
+  $retry.here
+  $todo.call
+  $cond.call
+  $retry.jumpIf
+;
+
 # [: times todo
 :repeat { $times $todo $loop }
   $todo.set   # [: times 

@@ -25,7 +25,6 @@
   $offset.decr                                # [: value
   
   # while there is value left, write a character and back up a step
-  [ dup 0 > ]
   [
     dup 10 % strings/ascii-zero +             #[: value <ascii-digit>
     $offset.get $buffer.get                   #[: value <ascii-digit> offset buffer
@@ -33,7 +32,8 @@
     10 /                                      #[: (value/10)
     $offset.decr                              #[: (value/10) # step back a step
   ]
-  while
+  [ dup 0 > ]
+  until
   
   pop
   

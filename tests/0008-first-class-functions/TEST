@@ -1,0 +1,53 @@
+
+@ "standard" ;
+
+# [: todo
+#    (calls todo for every fibonacci number)
+#    (stops generating numbers on overflow)
+# 
+:with-fibonaccis
+  {
+    $todo
+    $a
+    $b
+  }
+  
+  $todo.set
+  
+  1 $a.set
+  1 $b.set
+  
+  [ { $escape }
+    $escape.set
+    [
+      { $c }
+      
+      $a.get $todo.call
+      
+      $a.get $b.get > $escape.get when
+      
+      $b.get $c.set
+      
+      [ $a.get + ] $b.update
+      
+      $c.get $a.set
+    ]
+    loop
+  ]
+  stack/with-escape
+;
+
+:main { $n $last }
+  0 $n.set
+  0 $last.set
+  
+  [ 
+    $last.set
+    [1 +] $n.update
+  ]
+  with-fibonaccis
+  
+  "Largest Fibonacci Number That Fits in a U64" print
+  $n.get printno
+  $last.get printno
+;

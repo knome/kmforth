@@ -113,16 +113,16 @@
     @fieldRepetitions 1 -
   ;
   
-  # [: structaddr index
+  # [: index structaddr
   # [: &fieldValue[ index ]
   # 
   : @name//@fieldName.nth.addr { $index }
-    $index.set                     # [: structaddr
-    @name//@fieldName.addr         # [: fieldaddr
-    $index.get @fieldType.size * + # [: &fieldaddr[ index ]
+    @name//@fieldName.addr  #[: index fieldaddr
+    swap                    #[: fieldaddr index
+    @fieldType.size * +     #[: &fieldaddr[ index ]
   ;
   
-  # [: structaddr index
+  # [: index structaddr
   # [: fieldValue
   # 
   : @name//@fieldName.nth.get
@@ -130,14 +130,12 @@
     @fieldType.get             # [: value
   ;
   
-  # [: structaddr index newValue
+  # [: new-value index structaddr 
   # [: 
   # 
   : @name//@fieldName.nth.set { $value }
-    $value.set                 # [: structaddr index
-    @name//@fieldName.nth.addr # [: &fieldaddr[ index ]
-    $value.get                 # [: &fieldaddr[ index ] value
-    @fieldType.set             # [:
+    @name//@fieldName.nth.addr # [: new-value &fieldaddr[ index ]
+    @fieldType.set
   ;
 ;
 
@@ -158,39 +156,36 @@
     @fieldType.get
   ;
   
-  # [: structaddr value
+  # [: value structaddr
   # [: 
   # 
   : @name//@fieldName.set { $value }
-    $value.set
-    @name//@fieldName.addr
-    $value.get
+    @name//@fieldName.addr #[: value fieldaddr
     @fieldType.set
   ;
   
-  # [: structaddr todo
+  # [: todo structaddr
   # [:
   #
   : @name//@fieldName.update { $structaddr $todo }
-    $todo.set             #[: structaddr
-    $structaddr.copy      #[: structaddr
-    @name//@fieldName.get #[: value
-    $todo.get call        #[: updated-value
+    $structaddr.copy      #[: todo structaddr
+    @name//@fieldName.get #[: todo value
+    swap                  #[: value todo
+    call                  #[: updated-value
     $structaddr.get       #[: updated-value structaddr
-    swap                  #[: structaddr updated-value
-    @name//@fieldName.set #[:
+    @name//@fieldName.set #[: 
   ;
 
   # [: structaddr
   # [: 
-  : @name//@fieldName.incr { $fieldAddr }
-    [ 1 + ] @name//@fieldName.update
+  : @name//@fieldName.incr
+    [ 1 + ] swap @name//@fieldName.update
   ;
   
   # [: structaddr
   # [: 
   : @name//@fieldName.decr { $fieldAddr }
-    [ 1 - ] @name//@fieldName.update
+    [ 1 - ] swap @name//@fieldName.update
   ;
   
   # [: structaddr

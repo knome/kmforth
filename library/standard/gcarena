@@ -1,4 +1,6 @@
 
+# disabling everything in here for now since I'm swapping the struct argument order
+
 # see docs/gc for gcarena format information
 
 # a gcref has two parts
@@ -8,323 +10,324 @@
 #   in this way, we can save and move references to arena
 #   data easily in kmforth's stack values
 
-% gc/-header (@rc @st)
-  @ @rc @st (
-    (givenSizeInBytes           type/u64) # space user specified as maximum size
-    (actualSizeInBytes          type/u64) # actual space used ( multiple of pages )
-    (sizeInPages                type/u64) # number of pages used by the arena
-    (pointerToRootsStart        type/u64) # pointer to where roots section begins
-    (numberOfRoots              type/u64) # how many roots are there?
-    (pointerToEntriesStart      type/u64) # pointer to where entries section begins
-    (indexOfChunkForNextEntry   type/u64) # index in chunks of the next entry should go
-    (indexOfChunkEndingNextData type/u64) # pointer to where next data segment should end
-    (indexOfChunkEndingAllData  type/u64) # index of just after the last available chunk
-    (statsAllocations           type/u64) # how many allocations have we performed?
-    (statsCollections           type/u64) # how many collections have we performed?
-  );
-;
-
-% gc/-entry (@rc @st)
-  @ @rc @st (
-    (type         type/u32) # where the type-struct can be found for this type
-    (sizeInChunks type/u32) # how many chunks the data takes up
-    (data         type/u64) # either: the data ( if size <= entry//data.size ) or a location object
-  );
-;
-
-% gc/-chunk (@rc @st)
-  @ @rc @st (
-    (chunks type/u64)
-  );
-;
-
-% gc/-location (@rc @st)
-  @ @rc @st (
-    (dataIndex type/u32)
-    (dataSize  type/u32)
-  );
-;
-
-% gc/-root (@rc @st)
-  @ @rc @st (
-    (index type/u32)
-  );
-;
-
-@ struct/define gc/-header   ;
-@ struct/define gc/-entry    ;
-@ struct/define gc/-chunk    ;
-@ struct/define gc/-location ;
-@ struct/define gc/-root     ;
-
-:gc/-pagesize 4096 ;
-
-# [: size numberOfRoots
-# [: buffer err
+# % gc/-header (@rc @st)
+#   @ @rc @st (
+#     (givenSizeInBytes           type/u64) # space user specified as maximum size
+#     (actualSizeInBytes          type/u64) # actual space used ( multiple of pages )
+#     (sizeInPages                type/u64) # number of pages used by the arena
+#     (pointerToRootsStart        type/u64) # pointer to where roots section begins
+#     (numberOfRoots              type/u64) # how many roots are there?
+#     (pointerToEntriesStart      type/u64) # pointer to where entries section begins
+#     (indexOfChunkForNextEntry   type/u64) # index in chunks of the next entry should go
+#     (indexOfChunkEndingNextData type/u64) # pointer to where next data segment should end
+#     (indexOfChunkEndingAllData  type/u64) # index of just after the last available chunk
+#     (statsAllocations           type/u64) # how many allocations have we performed?
+#     (statsCollections           type/u64) # how many collections have we performed?
+#   );
+# ;
 # 
-:gc/arena
-  {
-    $size
-    $numberOfRoots
-    
-    $totalPages
-    $sizeofHeaderAndRoots
-    $sizeofHeaderAndRootsInPages
-    $minimumPagesForEntriesMetaAndChunks    
-    
-    $lacksSufficientSpaceForArena
-    
-    $buffer
-    $pointerToRootsStart
-    $pointerToEntriesStart
-    $endChunkIndex
-  }
-  
-  # the page size MUST be cleanly divisible by the entry size
-  # otherwise we've done something terribly wrong.
-  # for now, just panic. if we should ever add compile-time code/warnings/errors
-  # then it will be more appropriate to handle this sort of thing at that time.
-  # 
-  gc/-pagesize gc/-entry.size %
-  [ "IMPLEMENTATION ERROR: (PAGESIZE%GCENTRY.SIZE) IS NOT ZERO" panic ]
-  $.callIf
-  
-  # same with chunk sizes
-  # 
-  gc/-pagesize gc/-chunk.size %
-  [ "IMPLEMENTATION ERROR: (PAGESIZE%GCCHUNK.SIZE) IS NOT ZERO" panic ]
-  $.callIf
-  
-  # capture args
-  # 
-  $numberOfRoots.set               # [: size
-  $size.set                        # [: 
-  
-  # how many memory pages fit in the span the user gave us?
-  # 
-  $size.get gc/-pagesize / # [: numberOfFullPagesLessThanOrEqualToSize
-  $totalPages.set          # [: 
-  
-  # how large is the header and the roots that follow it?
-  # 
-  gc/-header.size type/u32.size $numberOfRoots.get * + # [: spaceNeededByHeaderAndRoots
-  $sizeofHeaderAndRoots.set                            # [: 
-  
-  # determine how many pages we need to hold the header and our roots array
-  # 
-  $sizeofHeaderAndRoots.get gc/-pagesize /
-  $sizeofHeaderAndRoots.get gc/-pagesize % not not +
-  $sizeofHeaderAndRootsInPages.set
-  
-  # we have to have at least one page of metadata and one for entries/data
-  # 
-  2 $minimumPagesForEntriesMetaAndChunks.set
-  
-  # determine if the number of pages we can fit in the span the user
-  # specified is sufficient to hold an arena
-  # 
-  $totalPages.get $sizeofHeaderAndRootsInPages.get $minimumPagesForEntriesMetaAndChunks.get + <
-  $lacksSufficientSpaceForArena.set
-  
-  # if the number of pages that fit in the max space specified by the user isn't sufficient
-  # to hold the required metadata, roots and at least one page of data chunks, then we don't
-  # bother to map the arena and just report an error to the caller
-  # 
-  $lacksSufficientSpaceForArena.get
-  [ 0 "space specified too small for gcarena" ]
-  $.callIf
-  
-  $lacksSufficientSpaceForArena.get
-  $.leaveIf
-  
-  # alright, there should be enough space, so we go ahead and allocate the region
-  # 
-  $totalPages.get gc/-pagesize * memory/map-region
-  
-  # if there was some error allocating the region, just pass it up the chain
-  # 
-  dup $.leaveIf
-  
-  # nope, we have mapped a region to represent the arena
-  # drop the no-error and save the pointer to our buffer
-  pop
-  $buffer.set
-  
-  # let us now figure out the offsets for various structures in the arena
-  # 
-  $buffer.get gc/-header.size +
-  $pointerToRootsStart.set
-  
-  $buffer.get $sizeofHeaderAndRootsInPages.get gc/-pagesize * +
-  $pointerToEntriesStart.set
-  
-  # we now need to initialize the header, the roots, and the metadata chunk
-  # 
-  $buffer.get $size.get gc/-header//givenSizeInBytes.set
-  
-  $buffer.get $totalPages.get gc/-pagesize * gc/-header//actualSizeInBytes.set
-  
-  $buffer.get $totalPages.get gc/-header//sizeInPages.set
-  
-  $buffer.get $pointerToRootsStart.get gc/-header//pointerToRootsStart.set
-  $buffer.get $pointerToEntriesStart.get gc/-header//pointerToEntriesStart.set
-  
-  $buffer.get gc/-pagesize gc/-chunk.size / gc/-header//indexOfChunkForNextEntry.set
-  
-  $totalPages.get $sizeofHeaderAndRootsInPages.get - gc/-pagesize * gc/-chunk.size /
-  $endChunkIndex.set
-  
-  $buffer.get $endChunkIndex.get gc/-header//indexOfChunkEndingNextData.set
-  $buffer.get $endChunkIndex.get gc/-header//indexOfChunkEndingAllData.set
-  
-  $buffer.get 0 gc/-header//statsAllocations.set
-  $buffer.get 0 gc/-header//statsCollections.set
-  
-  # we don't initialize the roots or metadata segment
-  # under the expectation that freshly mapped data is
-  # all zeros
-  
-  # everything should be ready to go with no error
-  # 
-  $buffer.get 0
-;
-
-# [: arena rootId size
-# [: gcref err
+# % gc/-entry (@rc @st)
+#   @ @rc @st (
+#     (type         type/u32) # where the type-struct can be found for this type
+#     (sizeInChunks type/u32) # how many chunks the data takes up
+#     (data         type/u64) # either: the data ( if size <= entry//data.size ) or a location object
+#   );
+# ;
 # 
-:gc/allocate
-  {
-    $arena $rootId $size
-    
-    $chunksRequiredForAllocation
-    $totalChunksRequired
-    $availableChunks
-    
-    $entryChunkIndex
-    $dataChunkIndex
-    
-    $entry
-    $location
-    $entryIndex
-    
-    $lacksEnoughChunks
-    
-    $root
-  }
-  
-  # save of parameters
-  # 
-  $size.set
-  $rootId.set
-  $arena.set
-  
-  # determine how many data chunks the given size of data will require
-  # 
-  $size.get gc/-chunks-required
-  $chunksRequiredForAllocation.set
-  
-  # determine the full number of data chunks including the entry
-  # 
-  # TODO: this needs to check if the next entry would be in a meta-data
-  # page, and if so, it needs to allocate sufficient space for that
-  # metadata page in addition to the entry itself.
-  # 
-  gc/-entry.size gc/-chunks-required $chunksRequiredForAllocation.get +
-  $totalChunksRequired.set
-  
-  # determine how many data chunks are available to be allocated
-  # 
-  $arena.get gc/-header//indexOfChunkEndingNextData.get
-  $arena.get gc/-header//indexOfChunkForNextEntry.get
-  -
-  $availableChunks.set
-  
-  # determine if there are insufficient chunks available.
-  # 
-  $availableChunks.get $totalChunksRequired.get <
-  $lacksEnoughChunks.set
-  
-  # panic if not. later we'll do a collection and check again
-  # 
-  $lacksEnoughChunks.get
-  [ "GC COLLECTION NOT YET IMPLEMENTED" panic ]
-  $.callIf
-  
-  # there is enough space
-  # allocate the entry at the start and the data at the end
-  # (
-  #   we'll compress data of one chunk into the entry at a
-  #   later time, for now we'll do far end only
-  # )
-  
-  # grab the chunk index where our entry will be
-  # 
-  $arena.get gc/-header//indexOfChunkForNextEntry.get
-  $entryChunkIndex.set
-  
-  # bump the next-entry field to after the one we're taking
-  # 
-  $arena.get $entryChunkIndex.get gc/-entry.size gc/-chunks-required + gc/-header//indexOfChunkForNextEntry.set
-  
-  # now determine where the data will go
-  # ( this will be the same as the next-data-end, so we'll set both from it
-  # 
-  $arena.get gc/-header//indexOfChunkEndingNextData.get $chunksRequiredForAllocation.get +
-  $dataChunkIndex.set
-  $arena.get $dataChunkIndex.get gc/-header//indexOfChunkEndingNextData.set
-  
-  # now convert the data over to an address so we can initialize the entry itself
-  # 
-  $arena.get $entryChunkIndex.get gc/-chunk-to-address
-  $entry.set
-  
-  $entry.get 0 gc/-entry//type.set
-  
-  $entry.get gc/-entry//data.addr
-  $location.set
-  
-  $location.get $dataChunkIndex.get              gc/-location//dataIndex.set
-  $location.get $chunksRequiredForAllocation.get gc/-location//dataSize.set
-  
-  # now set the given root to hold the index of the entry
-  # 
-  $entryChunkIndex.get gc/-entry.size gc/-chunk.size / /
-  $entryIndex.set
-  
-  # find the root via the rootId
-  # 
-  $arena.get gc/-header//pointerToRootsStart.get
-  gc/-root.size $rootId.get *
-  +
-  $root.set
-  
-  # set the root to the entry index
-  # 
-  $root.get $entryIndex.get gc/-root//index.set
-  
-  # for now, return rootId instead of the gcref
-  # 
-  $rootId.get 0
-;
-
-: gc/-chunks-required
-  { $size }
-  $size.set
-  
-  $size.get gc/-chunk.size /
-  $size.get gc/-chunk.size % not not +
-;
-
-# [: arena chunk
-# [: &chunk
+# % gc/-chunk (@rc @st)
+#   @ @rc @st (
+#     (chunks type/u64)
+#   );
+# ;
 # 
-: gc/-chunk-to-address
-  { $arena $chunkIndex }
-  
-  $chunkIndex.set
-  $arena.set
-  
-  $arena.get gc/-header//pointerToEntriesStart.get
-  $chunkIndex.get gc/-chunk.size *
-  +
-;
+# % gc/-location (@rc @st)
+#   @ @rc @st (
+#     (dataIndex type/u32)
+#     (dataSize  type/u32)
+#   );
+# ;
+# 
+# % gc/-root (@rc @st)
+#   @ @rc @st (
+#     (index type/u32)
+#   );
+# ;
+# 
+# @ struct/define gc/-header   ;
+# @ struct/define gc/-entry    ;
+# @ struct/define gc/-chunk    ;
+# @ struct/define gc/-location ;
+# @ struct/define gc/-root     ;
+# 
+# :gc/-pagesize 4096 ;
+# 
+# # [: size numberOfRoots
+# # [: buffer err
+# # 
+# :gc/arena
+#   {
+#     $size
+#     $numberOfRoots
+#     
+#     $totalPages
+#     $sizeofHeaderAndRoots
+#     $sizeofHeaderAndRootsInPages
+#     $minimumPagesForEntriesMetaAndChunks    
+#     
+#     $lacksSufficientSpaceForArena
+#     
+#     $buffer
+#     $pointerToRootsStart
+#     $pointerToEntriesStart
+#     $endChunkIndex
+#   }
+#   
+#   # the page size MUST be cleanly divisible by the entry size
+#   # otherwise we've done something terribly wrong.
+#   # for now, just panic. if we should ever add compile-time code/warnings/errors
+#   # then it will be more appropriate to handle this sort of thing at that time.
+#   # 
+#   gc/-pagesize gc/-entry.size %
+#   [ "IMPLEMENTATION ERROR: (PAGESIZE%GCENTRY.SIZE) IS NOT ZERO" panic ]
+#   $.callIf
+#   
+#   # same with chunk sizes
+#   # 
+#   gc/-pagesize gc/-chunk.size %
+#   [ "IMPLEMENTATION ERROR: (PAGESIZE%GCCHUNK.SIZE) IS NOT ZERO" panic ]
+#   $.callIf
+#   
+#   # capture args
+#   # 
+#   $numberOfRoots.set               # [: size
+#   $size.set                        # [: 
+#   
+#   # how many memory pages fit in the span the user gave us?
+#   # 
+#   $size.get gc/-pagesize / # [: numberOfFullPagesLessThanOrEqualToSize
+#   $totalPages.set          # [: 
+#   
+#   # how large is the header and the roots that follow it?
+#   # 
+#   gc/-header.size type/u32.size $numberOfRoots.get * + # [: spaceNeededByHeaderAndRoots
+#   $sizeofHeaderAndRoots.set                            # [: 
+#   
+#   # determine how many pages we need to hold the header and our roots array
+#   # 
+#   $sizeofHeaderAndRoots.get gc/-pagesize /
+#   $sizeofHeaderAndRoots.get gc/-pagesize % not not +
+#   $sizeofHeaderAndRootsInPages.set
+#   
+#   # we have to have at least one page of metadata and one for entries/data
+#   # 
+#   2 $minimumPagesForEntriesMetaAndChunks.set
+#   
+#   # determine if the number of pages we can fit in the span the user
+#   # specified is sufficient to hold an arena
+#   # 
+#   $totalPages.get $sizeofHeaderAndRootsInPages.get $minimumPagesForEntriesMetaAndChunks.get + <
+#   $lacksSufficientSpaceForArena.set
+#   
+#   # if the number of pages that fit in the max space specified by the user isn't sufficient
+#   # to hold the required metadata, roots and at least one page of data chunks, then we don't
+#   # bother to map the arena and just report an error to the caller
+#   # 
+#   $lacksSufficientSpaceForArena.get
+#   [ 0 "space specified too small for gcarena" ]
+#   $.callIf
+#   
+#   $lacksSufficientSpaceForArena.get
+#   $.leaveIf
+#   
+#   # alright, there should be enough space, so we go ahead and allocate the region
+#   # 
+#   $totalPages.get gc/-pagesize * memory/map-region
+#   
+#   # if there was some error allocating the region, just pass it up the chain
+#   # 
+#   dup $.leaveIf
+#   
+#   # nope, we have mapped a region to represent the arena
+#   # drop the no-error and save the pointer to our buffer
+#   pop
+#   $buffer.set
+#   
+#   # let us now figure out the offsets for various structures in the arena
+#   # 
+#   $buffer.get gc/-header.size +
+#   $pointerToRootsStart.set
+#   
+#   $buffer.get $sizeofHeaderAndRootsInPages.get gc/-pagesize * +
+#   $pointerToEntriesStart.set
+#   
+#   # we now need to initialize the header, the roots, and the metadata chunk
+#   # 
+#   $buffer.get $size.get gc/-header//givenSizeInBytes.set
+#   
+#   $buffer.get $totalPages.get gc/-pagesize * gc/-header//actualSizeInBytes.set
+#   
+#   $buffer.get $totalPages.get gc/-header//sizeInPages.set
+#   
+#   $buffer.get $pointerToRootsStart.get gc/-header//pointerToRootsStart.set
+#   $buffer.get $pointerToEntriesStart.get gc/-header//pointerToEntriesStart.set
+#   
+#   $buffer.get gc/-pagesize gc/-chunk.size / gc/-header//indexOfChunkForNextEntry.set
+#   
+#   $totalPages.get $sizeofHeaderAndRootsInPages.get - gc/-pagesize * gc/-chunk.size /
+#   $endChunkIndex.set
+#   
+#   $buffer.get $endChunkIndex.get gc/-header//indexOfChunkEndingNextData.set
+#   $buffer.get $endChunkIndex.get gc/-header//indexOfChunkEndingAllData.set
+#   
+#   $buffer.get 0 gc/-header//statsAllocations.set
+#   $buffer.get 0 gc/-header//statsCollections.set
+#   
+#   # we don't initialize the roots or metadata segment
+#   # under the expectation that freshly mapped data is
+#   # all zeros
+#   
+#   # everything should be ready to go with no error
+#   # 
+#   $buffer.get 0
+# ;
+# 
+# # [: arena rootId size
+# # [: gcref err
+# # 
+# :gc/allocate
+#   {
+#     $arena $rootId $size
+#     
+#     $chunksRequiredForAllocation
+#     $totalChunksRequired
+#     $availableChunks
+#     
+#     $entryChunkIndex
+#     $dataChunkIndex
+#     
+#     $entry
+#     $location
+#     $entryIndex
+#     
+#     $lacksEnoughChunks
+#     
+#     $root
+#   }
+#   
+#   # save of parameters
+#   # 
+#   $size.set
+#   $rootId.set
+#   $arena.set
+#   
+#   # determine how many data chunks the given size of data will require
+#   # 
+#   $size.get gc/-chunks-required
+#   $chunksRequiredForAllocation.set
+#   
+#   # determine the full number of data chunks including the entry
+#   # 
+#   # TODO: this needs to check if the next entry would be in a meta-data
+#   # page, and if so, it needs to allocate sufficient space for that
+#   # metadata page in addition to the entry itself.
+#   # 
+#   gc/-entry.size gc/-chunks-required $chunksRequiredForAllocation.get +
+#   $totalChunksRequired.set
+#   
+#   # determine how many data chunks are available to be allocated
+#   # 
+#   $arena.get gc/-header//indexOfChunkEndingNextData.get
+#   $arena.get gc/-header//indexOfChunkForNextEntry.get
+#   -
+#   $availableChunks.set
+#   
+#   # determine if there are insufficient chunks available.
+#   # 
+#   $availableChunks.get $totalChunksRequired.get <
+#   $lacksEnoughChunks.set
+#   
+#   # panic if not. later we'll do a collection and check again
+#   # 
+#   $lacksEnoughChunks.get
+#   [ "GC COLLECTION NOT YET IMPLEMENTED" panic ]
+#   $.callIf
+#   
+#   # there is enough space
+#   # allocate the entry at the start and the data at the end
+#   # (
+#   #   we'll compress data of one chunk into the entry at a
+#   #   later time, for now we'll do far end only
+#   # )
+#   
+#   # grab the chunk index where our entry will be
+#   # 
+#   $arena.get gc/-header//indexOfChunkForNextEntry.get
+#   $entryChunkIndex.set
+#   
+#   # bump the next-entry field to after the one we're taking
+#   # 
+#   $arena.get $entryChunkIndex.get gc/-entry.size gc/-chunks-required + gc/-header//indexOfChunkForNextEntry.set
+#   
+#   # now determine where the data will go
+#   # ( this will be the same as the next-data-end, so we'll set both from it
+#   # 
+#   $arena.get gc/-header//indexOfChunkEndingNextData.get $chunksRequiredForAllocation.get +
+#   $dataChunkIndex.set
+#   $arena.get $dataChunkIndex.get gc/-header//indexOfChunkEndingNextData.set
+#   
+#   # now convert the data over to an address so we can initialize the entry itself
+#   # 
+#   $arena.get $entryChunkIndex.get gc/-chunk-to-address
+#   $entry.set
+#   
+#   $entry.get 0 gc/-entry//type.set
+#   
+#   $entry.get gc/-entry//data.addr
+#   $location.set
+#   
+#   $location.get $dataChunkIndex.get              gc/-location//dataIndex.set
+#   $location.get $chunksRequiredForAllocation.get gc/-location//dataSize.set
+#   
+#   # now set the given root to hold the index of the entry
+#   # 
+#   $entryChunkIndex.get gc/-entry.size gc/-chunk.size / /
+#   $entryIndex.set
+#   
+#   # find the root via the rootId
+#   # 
+#   $arena.get gc/-header//pointerToRootsStart.get
+#   gc/-root.size $rootId.get *
+#   +
+#   $root.set
+#   
+#   # set the root to the entry index
+#   # 
+#   $root.get $entryIndex.get gc/-root//index.set
+#   
+#   # for now, return rootId instead of the gcref
+#   # 
+#   $rootId.get 0
+# ;
+# 
+# : gc/-chunks-required
+#   { $size }
+#   $size.set
+#   
+#   $size.get gc/-chunk.size /
+#   $size.get gc/-chunk.size % not not +
+# ;
+# 
+# # [: arena chunk
+# # [: &chunk
+# # 
+# : gc/-chunk-to-address
+#   { $arena $chunkIndex }
+#   
+#   $chunkIndex.set
+#   $arena.set
+#   
+#   $arena.get gc/-header//pointerToEntriesStart.get
+#   $chunkIndex.get gc/-chunk.size *
+#   +
+# ;
+# 

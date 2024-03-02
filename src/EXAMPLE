@@ -1,61 +1,35 @@
 
-# https://blog.rchapman.org/posts/Linux_System_Call_Table_for_x86_64/
-
 @ "standard" ;
 
-# :main { $A $B }
-#   
-#   0 pop
-#   
-#   [ { $escape }
-#   
-#     $escape.set
-# 
-#     1 pop
-#   
-#     $escape.get call
-# 
-#     2 pop
-#   
-#   ]
-#   
-#   $B.set
-#   
-#   $B.get stack/with-escape
-#   
-#   3 pop
-#   
-# ;
+:main { $load $sw $onErrDie }
+  
+  &syscall/write $sw.set
+  
+  [ [ 100 exit ] when pop ] $onErrDie.set
 
-:main { $A }
+  [ {$buffer $cursor $len}
     
-    [ { $escape }
-      
-      $escape.set
-      
-      0 $A.set
-      [
-        # "hello" print
-        # $A.get printno
-        
-        $A.get 1 + $A.set
-        
-        $A.get 200 >
-        [ $escape.get call ]
-        when
-      
-      ] recursor
-    ] stack/with-escape
+    $buffer.copy
+    $cursor.set
     
-    "wat" print
-    $A.get printno
-;
-
-# a simple infinite self-recurser that calls another function every frame deeper it gets
-#
-#[ <fn/0>
-#[ 
-:recursor
-  dup call
-  recursor
+    [ $buffer.get 4096 16 * + $cursor.get - 4 > ]
+    [
+      121 $cursor.get memory/poke-b
+      $cursor.incr
+      101 $cursor.get memory/poke-b
+      $cursor.incr
+      115 $cursor.get memory/poke-b
+      $cursor.incr
+      10 $cursor.get memory/poke-b
+      $cursor.incr
+    ]
+    while
+    
+    0 $cursor.get memory/poke-b
+    $buffer.get strings/length $len.set
+    
+    [ $buffer.get $len.get 1 $sw.call $onErrDie.call ] loop
+  ]
+  4096 16 *
+  stack/call-with-stack-buffer
 ;

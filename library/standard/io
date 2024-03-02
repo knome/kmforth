@@ -248,14 +248,13 @@
         $n.get swap - decr       ###[: ss... <reversed-index>
         syscall/iovec.size *     ###[: ss... <nth-iovec-offset>
         $iovecs.get +            ###[: ss... <nth-iovec>
-        $iovec.copy              ###[: ss... <nth-iovec>
-        swap                     ###[: ss... <nth-iovec> <s> (pops one string off the stack)
-        dup                      ###[: ss... <nth-iovec> <s> <s>
-        strings/length           ###[: ss... <nth-iovec> <s> <s-len>
-        $iovec.get               ###[: ss... <nth-iovec> <s> <s-len> <nth-iovec>
-        swap                     ###[: ss... <nth-iovec> <s> <nth-iovec> <s-len>
-        dup [+] $total.update    ###[: ss... <nth-iovec> <s> <nth-iovec> <s-len>
-        syscall/iovec//len.set   ###[: ss... <nth-iovec> <s>
+        $iovec.set               ###[: ss... 
+        dup                      ###[: ss... <s> <s>
+        strings/length           ###[: ss... <s> <s-len>
+        dup [+] $total.update    ###[: ss... <s> <s-len>
+        $iovec.get               ###[: ss... <s> <s-len> <nth-iovec>
+        syscall/iovec//len.set   ###[: ss... <s>
+        $iovec.get               ###[: ss... <s> <iovec>
         syscall/iovec//base.set  ###[: ss...
       ]                          ##[: ss... n <todo>
       for-range                  ##[: 
@@ -298,11 +297,12 @@
         # while written > next iovec
         # sub its value from written and remove it
         # 
-        [ dup $iovecs.get syscall/iovec//len.get > ]
+        [ dup $iovecs.get syscall/iovec//len.get < ]
         [
           #                                     ####[: written
           $iovecs.get syscall/iovec//len.get -  ####[: written=<written - amount in current iovec len>
           [syscall/iovec.size +] $iovecs.update ####[: written  # (we move iovec ahead one entry
+          [1 -] $n.update                       ####[: written  # (we decrease the count of iovecs by one
         ]
         while
         
@@ -311,8 +311,7 @@
         #
         dup 0 >
         [
-          $iovecs.get [-] syscall/iovec//len.update ####[: (empty) # we consume the rest of written updating current iovec/len
-          0                                         ####[: 0
+          [-] $iovecs.get syscall/iovec//len.update ####[: (empty) # we consume the rest of written updating current iovec/len
         ]
         when
       ]

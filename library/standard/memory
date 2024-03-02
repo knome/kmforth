@@ -45,13 +45,13 @@
     `
   ;
   
-  # [: destAddr value
+  # [: value destAddr
   # [: 
   # 
   :memory/poke-@name
     `
-    mov rbx,[r14-8]     ; get value
-    mov rax,[r14-16]    ; get destination address
+    mov rax,[r14-8]    ; get destination address
+    mov rbx,[r14-16]   ; get value
     sub r14,16
     mov [rax],@writeSource@
     `
@@ -80,77 +80,69 @@
 # [: 
 # 
 : memory/memmove
+  {
+    $dst
+    $src
+    $len
+    $thus
+  }
   
-  0 # [: dst src len thus
+  $len.set
+  $src.set
+  $dst.set
   
-  [ # checks if remaining has any left
-    { $thus $len }
-    
-    $thus.set $len.set    # grab the two values
-    $len.get $thus.get    # and replace them on the stack
-    
-    $thus.get $len.get <  # then push the comparison
-  ]
+  0 $thus.set
+  
+  [ $thus.get $len.get < ]
   [
-    { $dst $src $len $thus }
-    
-    $thus.set
-    $len.set
-    $src.set
-    $dst.set
-    
-    $dst.get $thus.get +
-      $src.get $thus.get + memory/peek-b
-    memory/poke-b
-    
-    $dst.get
-    $src.get
-    $len.get
-    $thus.get 1 +
+    $src.get $thus.get + memory/peek-b #[: src[index]
+    $dst.get $thus.get + memory/poke-b #[: (set dst[index])
   ]
   while
-  
-  pop pop pop pop
-  
 ;
 
-# [: &bitmap bitIndex
-# [: 
+# # [: bitIndex &bitmap
+# # [: 
+# # 
+# : memory/bitmap.setNth
+#     { $bitmap $which $whichByte $mask }
+#     
+#     $bitmap.set                  #[: index
+#     
+#     $which.set                   #[: 
+#     $which.get 8 /               #[: byte-index
+#     
+# !!! # partial refactor stopped because this isn't used anywhere
 # 
-: memory/bitmap.setNth
-    { $which $whichByte $mask }
-    
-    $which.set         # [: &bitmap
-    $which.get 8 /     # [: &bitmap whichByte
-    +                  # [: &whichByte
-    $whichByte.set     # [: 
-    
-    $which.get 8 %     # [: whichBit
-    0b10000000 swap >> # [: mask=(0b10000000>>whichBit)
-    $mask.set          # [: 
-    
-    $whichByte.get memory/peek-b # [: currentByte
-    $mask.get                    # [: currentByte mask
-    or                           # [: newByte=(currentByte|mask)
-    $whichByte.get swap          # [: &byte newByte
-    memory/poke-b                # [: 
-;
-
-# [: &bitmap bitIndex
+#     +                            #[: &whichByte
+#     $whichByte.set               #[:
+#     
+#     $which.get 8 %               #[: whichBit
+#     0b10000000 swap >>           #[: mask=(0b10000000>>whichBit)
+#     $mask.set                    #[:
+#     
+#     $whichByte.get memory/peek-b #[: currentByte
+#     $mask.get                    #[: currentByte mask
+#     or                           #[: newByte=(currentByte|mask)
+#     $whichByte.get swap          #[: &byte newByte
+#     memory/poke-b                #[:
+# ;
 # 
-: memory/bitmap.getNth
-  { $which $whichByte $mask }
-  
-  $which.set         # [: &bitmap
-  $which.get 8 /     # [: &bitmap whichByte
-  +                  # [: &whichByte
-  $whichByte.set     # [:
-  
-  $which.get 8 %     # [: whichBit
-  0b10000000 swap >> # [: mask=(0b10000000>>whichBit)
-  $mask.set          # [: 
-  
-  $whichByte.get memory/peek-b # [: currentByte
-  $mask.get                    # [: currentByte mask
-  and                          # [: ifSet=(currentByte&mask)
-;
+# # [: &bitmap bitIndex
+# # 
+# : memory/bitmap.getNth
+#   { $which $whichByte $mask }
+#   
+#   $which.set         # [: &bitmap
+#   $which.get 8 /     # [: &bitmap whichByte
+#   +                  # [: &whichByte
+#   $whichByte.set     # [:
+#   
+#   $which.get 8 %     # [: whichBit
+#   0b10000000 swap >> # [: mask=(0b10000000>>whichBit)
+#   $mask.set          # [: 
+#   
+#   $whichByte.get memory/peek-b # [: currentByte
+#   $mask.get                    # [: currentByte mask
+#   and                          # [: ifSet=(currentByte&mask)
+# ;

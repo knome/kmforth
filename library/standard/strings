@@ -16,33 +16,30 @@
   strings/number-buffer//bytes.last-index     # [: value <last-index>
   $offset.set                                 # [: value
   
-  $buffer.get $offset.get 0                   # [: value buffer offset nul
+  # write a nul into the last byte of the number buffer
+  # 
+  strings/ascii-nul $offset.get $buffer.get   # [: value nul offset buffer
   strings/number-buffer//bytes.nth.set        # [: value
   
-  $offset.decr
+  # back up one step to start writing ascii numbers
+  $offset.decr                                # [: value
   
-  $loop.here
+  # while there is value left, write a character and back up a step
+  [ dup 0 > ]
+  [
+    dup 10 % strings/ascii-zero +             #[: value <ascii-digit>
+    $offset.get $buffer.get                   #[: value <ascii-digit> offset buffer
+    strings/number-buffer//bytes.nth.set      #[: value
+    10 /                                      #[: (value/10)
+    $offset.decr                              #[: (value/10) # step back a step
+  ]
+  while
   
-  dup 10 %                                    # [: value <value mod 10>
-  48 +                                        # [: value <ascii-digit>
-  
-  $buffer.get swap                            # [: value <buffer> <ascii-digit>
-  $offset.get swap                            # [: value <buffer> <write-index> <ascii-digit>
-  strings/number-buffer//bytes.nth.set        # [: value
-  
-  10 /                                        # [: (value/10)
-  $offset.decr                                # [: so we'll write to the next spot back
-  
-  dup                                         # [: (value/10) (value/10)
-  
-  $loop.jumpIf                                # [: (value/10)
-  
-  #                                           # [: 0
-  pop                                         # [:
+  pop
   
   $offset.incr
-  $buffer.get $offset.get                     # [: buffer offset
-  strings/number-buffer//bytes.nth.addr       # [: <addr-of-start-of-string>
+  $offset.get $buffer.get
+  strings/number-buffer//bytes.nth.addr
 ;
 
 :strings/length
@@ -93,38 +90,3 @@
   (a      97)
   (z     122)
 );
-
-# # string buffer
-# # a checked buffer for building up strings before writing them as a whole
-# 
-# % strings/-string-buffer-header (@rc @st)
-#   @ @rc @st (
-#     (size   type/u32)
-#     (cursor type/u32)
-#     (end    type/u8 0) # takes no space in the header but allows us to index the rest of the buffer
-#   );
-# @ struct/define strings/-string-buffer-header ;
-# 
-# # initializes any given buffer to be a string-buffer
-# # 
-# # [: buffer buffersize
-# # [: err
-# :strings/initialize-string-buffer { $size }
-#   #                                                     # [: buffer buffersize
-#   dup strings/-string-buffer-header.size 1 + <          # [: buffer buffersize (<)=(buffer<minimum-size)
-#   dup                                                   # [: buffer buffersize (<) (<)
-#   [
-#     # [: buffer buffersize (<)
-#     pop pop pop
-#     "buffer too small to be used as string-buffer" 1
-#   ] $.callIf                                            # [: err (<) | buffer buffersize (<)
-#   $.leaveIf                                             # [: err     | buffer buffersize
-#   
-#   $size.set                                             # [: buffer
-#   dup $size.get strings/-string-buffer-header//size.set # [: buffer
-#   
-#   dup 0 strings/-string-buffer-header//cursor.set       # [: buffer
-#   0 0 strings/-string-buffer-header//end.nth.set        # [: buffer
-#   
-#   0                                                     # [: <no-err>
-# ;

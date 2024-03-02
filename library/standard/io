@@ -43,8 +43,8 @@
   # guess that any value under 1024 is an errno
   # any value over that is assumed to be a pointer to a string
   # 
-  dup 1024 <             # [: err isErrno=(err<1024)
-  dup                    # [: err isErrno isErrno
+  dup 1024 is-lesser-than  # [: err isErrno=(err<1024)
+  dup                      # [: err isErrno isErrno
   
   # print the error if it is an errno
   # 
@@ -184,11 +184,7 @@
 # [: exitcode
 # n/a
 # 
-:exit
-  syscall/SYSCALL-EXIT syscall/one
-  "implementation error - exit failed?" log
-  [] loop
-;
+:exit syscall/exit ;
 
 # output ordering is FIFO, not stack-backwards
 # [: "hello" ", " "there" 3 write-strings --> "hello, there"
@@ -291,7 +287,7 @@
         # while written > next iovec
         # sub its value from written and remove it
         # 
-        [ dup $iovecs.get syscall/iovec//len.get < ]
+        [ dup $iovecs.get syscall/iovec//len.get is-bigger-than ]
         [
           #                                     ####[: written
           $iovecs.get syscall/iovec//len.get -  ####[: written=<written - amount in current iovec len>
@@ -303,7 +299,7 @@
         # if there is any written remaining,
         # sub it from the next iovec before looping
         #
-        dup 0 >
+        dup 0 is-bigger-than
         [
           [-] $iovecs.get syscall/iovec//len.update ####[: (empty) # we consume the rest of written updating current iovec/len
         ]

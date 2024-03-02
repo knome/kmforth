@@ -24,7 +24,7 @@
       
       $a.get $todo.call
       
-      $a.get $b.get > $escape.get when
+      $a.get $b.get is-bigger-than $escape.get when
       
       $b.get $c.set
       

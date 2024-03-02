@@ -93,7 +93,7 @@
   
   0 $thus.set
   
-  [ $thus.get $len.get < ]
+  [ $thus.get $len.get is-smaller-than ]
   [
     $src.get $thus.get + memory/peek-b #[: src[index]
     $dst.get $thus.get + memory/poke-b #[: (set dst[index])

@@ -32,7 +32,7 @@
     10 /                                      #[: (value/10)
     $offset.decr                              #[: (value/10) # step back a step
   ]
-  [ dup 0 > ]
+  [ dup 0 is-bigger-than ]
   until
   
   pop

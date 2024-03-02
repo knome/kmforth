@@ -151,13 +151,13 @@
   $s.set                        #[: 
   0                             #[: total
   $loop.here
-  $s.get memory/peek-b dup dup  #[: total byte byte byte
-  strings/ascii-zero < swap     #[: total byte (byte<"0") byte
-  strings/ascii-nine > or dup   #[: total byte ((byte<"0")||(byte>"9")) ((byte<"0")||(byte>"9"))
-  [ pop pop 1 ] $.callIf        #[: total 1 | total byte (((byte<"0")||(byte>"9"))=0)
-  $.leaveIf                     #[: <> total | total byte
-  strings/ascii-zero -          #[: total (byte-"0")
-  swap 10 * +                   #[: total=(total*10+(byte-"0"))
+  $s.get memory/peek-b dup dup             #[: total byte byte byte
+  strings/ascii-zero is-smaller-than swap  #[: total byte (byte<"0") byte
+  strings/ascii-nine is-bigger-than or dup #[: total byte ((byte<"0")||(byte>"9")) ((byte<"0")||(byte>"9"))
+  [ pop pop 1 ] $.callIf                   #[: total 1 | total byte (((byte<"0")||(byte>"9"))=0)
+  $.leaveIf                                #[: <> total | total byte
+  strings/ascii-zero -                     #[: total (byte-"0")
+  swap 10 * +                              #[: total=(total*10+(byte-"0"))
   $s.incr
   $loop.jump
 ;
@@ -171,13 +171,13 @@
   #                            #[: string
   0                            #[: string total
   $loop.here
-  1 nth memory/peek-b dup dup  #[: string total byte byte byte
-  strings/ascii-zero < swap    #[: string total byte (byte<"0") byte
-  strings/ascii-nine > or dup  #[: string total byte ((byte<"0")||(byte>"9")) ((byte<"0")||(byte>"9"))
-  [ pop pop 1 ] $.callIf       #[: string total 1 | string total byte (((byte<"0")||(byte>"9"))=0)
-  $.leaveIf                    #[: <> string total | string total byte
-  strings/ascii-zero -         #[: string total (byte-"0")
-  swap 10 * +                  #[: string total=(total*10+(byte-"0"))
-  swap 1 + swap                #[: (string+1) total
+  1 nth memory/peek-b dup dup               #[: string total byte byte byte
+  strings/ascii-zero is-smaller-than swap   #[: string total byte (byte<"0") byte
+  strings/ascii-nine is-bigger-than or dup  #[: string total byte ((byte<"0")||(byte>"9")) ((byte<"0")||(byte>"9"))
+  [ pop pop 1 ] $.callIf                    #[: string total 1 | string total byte (((byte<"0")||(byte>"9"))=0)
+  $.leaveIf                                 #[: <> string total | string total byte
+  strings/ascii-zero -                      #[: string total (byte-"0")
+  swap 10 * +                               #[: string total=(total*10+(byte-"0"))
+  swap 1 + swap                             #[: (string+1) total
   $loop.jump
 ;

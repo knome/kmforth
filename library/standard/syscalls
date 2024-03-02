@@ -22,11 +22,14 @@
   sub r14,8
   mov rdi,[r14]
   syscall
+  
+  mov [r14], rax
+  add r14, 8
   `
-  dup 0 <                 # rv (rv<0)
-  [ 0 swap neg ]          # rv (<) ontrue
-  [ 0 ]                   # rv (<) ontrue onfalse
-  if                      # 0 err | rv=amount 0
+  dup 0 is-lesser-than   # rv (rv<0)
+  [ 0 swap neg ]         # rv (<) ontrue
+  [ 0 ]                  # rv (<) ontrue onfalse
+  if                     # 0 err | rv=amount 0
 ;
 
 # [: <rdi> <rsi> <rdx> <syscall-no>
@@ -46,10 +49,10 @@
   mov [r14],rax
   add r14,8
   `
-  dup 0 <                 # rv (rv<0)
-  [ 0 swap neg ]          # rv (<) ontrue
-  [ 0 ]                   # rv (<) ontrue onfalse
-  if                      # 0 err | rv=amount 0
+  dup 0 is-lesser-than   # rv (rv<0)
+  [ 0 swap neg ]         # rv (<) ontrue
+  [ 0 ]                  # rv (<) ontrue onfalse
+  if                     # 0 err | rv=amount 0
 ;
 
 # [: <rdi> <rsi> <rdx> <r10> <r8> <r9> <syscall-no>
@@ -77,11 +80,10 @@
   mov [r14],rax
   add r14,8
   `
-  dup 0 <                 # rv (rv<0)
-  [ 0 swap neg ]          # rv (<) ontrue
-  [ 0 ]                   # rv (<) ontrue onfalse
-  if                      # 0 err | rv=amount 0
-
+  dup 0 is-lesser-than   # rv (rv<0)
+  [ 0 swap neg ]         # rv (<) ontrue
+  [ 0 ]                  # rv (<) ontrue onfalse
+  if                     # 0 err | rv=amount 0
 ;
 
 # PROT_NONE            0x0
@@ -140,6 +142,7 @@
 :syscall/exit
   syscall/SYSCALL-EXIT
   syscall/one
+  [] loop
 ;
 
 # for desired-address

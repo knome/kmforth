@@ -1,13 +1,19 @@
 
+# NEVER DEFINE THESE
+# USE BIGGER-SMALLER FOR UNSIGNED
+# USE GREATER-LESSER FOR SIGNED
+
+# < > <= >=
+
 :neg ` neg qword [r14-8] ` ;
 
-# a b >  is  a > b
+# a b is-greater-than ( signed a > b )
 # 
-:>
+:is-greater-than
   `
   impl: kmforth/python
   type: token-replace
-  name: >
+  name: is-greater-than
   when: I,I
   
   (lambda a, b:
@@ -22,18 +28,10 @@
   
   =====
   impl: kmforth/python
-  type: code
-  name: >
-  when: A=rbx,C
-  
-  ERROR UNIMPLEMENTED
-  
-  =====
-  impl: kmforth/python
-  name: >
+  name: is-greater-than
   type: code
   
-  ; op >
+  ; op is-greater (signed)
   sub r14,8      ; right
   mov rax, [r14] ;
   sub r14,8      ; left
@@ -50,15 +48,52 @@
   `
 ;
 
-:<= > [ 0 ][ 1 ] if ;
-
-# a b <  is  a < b
+# a b is-bigger-than ( unsigned a > b )
 # 
-:<
+:is-bigger-than
   `
   impl: kmforth/python
   type: token-replace
-  name: <
+  name: is-bigger-than
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              1 if a.value() > b.value() else 0
+          )
+      )]
+  )
+  
+  =====
+  impl: kmforth/python
+  name: is-bigger-than
+  type: code
+  
+  ; op is-bigger-than (unsigned)
+  sub r14,8      ; right
+  mov rax, [r14] ;
+  sub r14,8      ; left
+  mov rbx, [r14] ; 
+  cmp rbx,rax
+  ja  .more      ; unsigned comparison
+  mov qword [r14], 0
+  add r14, 8
+  jmp .out
+ .more:
+  mov qword [r14], 1
+  add r14, 8
+ .out:
+  `
+;
+
+:is-lesser-than
+  `
+  impl: kmforth/python
+  type: token-replace
+  name: is-lesser-than
   when: I,I
   
   (lambda a, b:
@@ -73,7 +108,7 @@
 
   ===
 
-  ; op <
+  ; op is-lesser-than (signed)
   sub r14,8      ; right
   mov rax, [r14] ;
   sub r14,8      ; left
@@ -90,7 +125,46 @@
   `
 ;
 
-:>= < [ 0 ][ 1 ] if ;
+:is-smaller-than
+  `
+  impl: kmforth/python
+  type: token-replace
+  name: is-smaller-than
+  when: I,I
+  
+  (lambda a, b:
+      [Token(
+          location = self.location(),
+          kind     = 'integer',
+          value    = (
+              1 if a.value() < b.value() else 0
+          )
+      )]
+  )
+
+  ===
+
+  ; op is-smaller-than (unsigned comparison)
+  sub r14,8      ; right
+  mov rax, [r14] ;
+  sub r14,8      ; left
+  mov rbx, [r14] ; 
+  cmp rbx,rax
+  jb  .less      ; unsigned comparison
+  mov qword [r14], 0
+  add r14, 8
+  jmp .out
+ .less:
+  mov qword [r14], 1
+  add r14, 8
+ .out:
+  `
+;
+
+:is-greater-than-or-equal-to is-lesser-than  not ;
+:is-bigger-than-or-equal-to  is-smaller-than not ;
+:is-lesser-than-or-equal-to  is-greater-than not ;
+:is-smaller-than-or-equal-to is-bigger-than  not ;
 
 :+
   `
@@ -341,7 +415,7 @@
   `
 ;
 
-:!= == [ 0 ][ 1 ] if ;
+:!= == not ;
 
 # left-shift
 # 

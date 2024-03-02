@@ -34,8 +34,8 @@
 
 # [: times todo
 :repeat { $times $todo $loop }
-  $times.set  # [: todo
-  $todo.set   # [: 
+  $todo.set   # [: times 
+  $times.set  # [:
   $loop.here  # [: 
   
   $times.get  # [: times
@@ -49,6 +49,26 @@
   call        # [: 
   
   $loop.jump  # [:
+;
+
+#[: times todo
+#[: (calls todo with each index from 0 until >= times)
+#[:
+:for-range
+  {
+    $todo
+    $index
+  }
+  
+  $todo.set
+  0 $index.set
+  
+  [
+    $index.get
+    $index.incr
+    $todo.get call
+  ]
+  repeat
 ;
 
 # [: cond onIf onElse

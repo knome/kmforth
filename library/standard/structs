@@ -168,26 +168,36 @@
     @fieldType.set
   ;
   
+  # [: structaddr todo
+  # [:
+  #
+  : @name//@fieldName.update { $structaddr $todo }
+    $todo.set             #[: structaddr
+    $structaddr.copy      #[: structaddr
+    @name//@fieldName.get #[: value
+    $todo.get call        #[: updated-value
+    $structaddr.get       #[: updated-value structaddr
+    swap                  #[: structaddr updated-value
+    @name//@fieldName.set #[:
+  ;
+
   # [: structaddr
   # [: 
   : @name//@fieldName.incr { $fieldAddr }
-    @name//@fieldName.addr
-    $fieldAddr.set
-    $fieldAddr.get @fieldType.get
-    1 +
-    $fieldAddr.get swap @fieldType.set
+    [ 1 + ] @name//@fieldName.update
   ;
   
   # [: structaddr
   # [: 
   : @name//@fieldName.decr { $fieldAddr }
-    @name//@fieldName.addr
-    $fieldAddr.set
-    $fieldAddr.get @fieldType.get
-    1 -
-    $fieldAddr.get swap @fieldType.set
+    [ 1 - ] @name//@fieldName.update
   ;
-
+  
+  # [: structaddr
+  #
+  : @name//@fieldName.call
+    @name//@fieldName.get call
+  ;
 ;
 
 # for

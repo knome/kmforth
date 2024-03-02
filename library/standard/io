@@ -201,123 +201,125 @@
 # output ordering is FIFO, not stack-backwards
 # [: "hello" ", " "there" 3 write-strings --> "hello, there"
 # 
-# [: string... numstrings
-# [: err
+#[: string... numstrings
+#[: err
+#
 :write-strings
-  dup 0 ==                     #[: n=0 1 | ss=string... n=1+ 0
-  $.leaveIf                    #[: <> 0 | string... n
+  {
+    $n
+  }
+
+  # if there are no strings, don't bother
+  # 
+  dup 0 ==                     #[: n=0 1 | ss=strings... n=1+ 0
+  $.leaveIf                    #[: <> 0 | ss... n
   
-  dup syscall/iovec.size *     #[: string... n <required-iovec-array-size>
+  $n.copy                      #[: ss... n
   
-  [ 
-     { $iovecs $s $n $cur $total $loop $inner }
-     
-     #                                ###[: string... n iovecs=<iovec-array-buffer>
-     $iovecs.set                      ###[: ss... n
-     $n.set                           ###[: ss...
-     
-     0 $total.set
-     
-     syscall/iovec.size $n.get *      ###[: ss... <offset to one after last iovec>
-     $iovecs.get +                    ###[: ss... <pointer to one after last iovec>
-     $cur.set                         ###[: ss...
-     
-     $loop.here
-     
-     dup 0 ==
-     [ pop "(null)" ] $.callIf        ###[: ss? "(null)" | ss? s # just handle this common error
-     
-     $s.set                           ###[: ss? s # we only enter the loop when (ss.count>0)
-     
-     $cur.get syscall/iovec.size -    ###[: ss... (cur-sizeof(iovec))
-     dup $cur.set                     ###[: ss... cur
-     
-     $s.get                           ###[: ss? cur s
-     
-     syscall/iovec//base.set          ###[: ss? 
-     $cur.get $s.get strings/length   ###[: ss? cur <s-length>
-     dup $total.get + $total.set      ###[: ss? cur <s-length>
-     syscall/iovec//len.set           ###[: ss?
-     
-     $cur.get $iovecs.get !=          ###[: ss? <next-is-not-start>
-     $loop.jumpIf                     ###[: - # if this don't jump, the stack is empty
-     
-     # we have a full iovec now
-     # time to start writing it out
-     
-     # next is pointing at the first item right now
-     
-     $loop.here
-     
-     # print some
-     
-     syscall/STDOUT $iovecs.get $n.get ###[: stdout iovecs num-iovecs
-     syscall/writev                    ###[: written? err?
-     
-     # check for any write errors
-     
-     dup                              ###[: written? err? err?
-     [ swap pop 1 ] $.callIf          ###[: err 1 | written 0
-     $.leaveIf                        ###[: <> err | written
-     
-     # update the total remaining to account for the portion written
-     
-     dup $total.get swap - $total.set ###[: written
-     
-     # check if we're done
-     # (no need to waste time on iovec if we wrote everything)
-     
-     $total.get 0 == dup              ###[: written (total==0?) (total==0?)
-     [ pop pop 0 1 ] $.callIf         ###[: written 0 1 | written (total!=0)
-     $.leaveIf                        ###[: <> 0 | written
-     
-     # update iovec with write
-     
-     $inner.here
-     
-     $cur.get swap dup $cur.get        ###[: cur written written cur
-     syscall/iovec//len.get >=         ###[: cur written (written>=cur.len)
-     [
-         # written is >=
-         #                              #####[: cur written
-         1 nth                          #####[: cur written cur
-         syscall/iovec//len.get         #####[: cur written (cur.len)
-         -                              #####[: cur remaining=(written-cur.len)
-         1 nth 0 syscall/iovec//len.set #####[: cur remaining
-         swap                           #####[: remaining cur
-         syscall/iovec.size + swap      #####[: (cur+sizeof(iovec)) (written-cur.len)
-         1 swap                         #####[: (cur+sizeof(iovec)) (changed-cur) (written-cur.len)
-     ]
-     [
-         { $nn }
-         # written is <
-         #                              #####[: cur written
-         1 nth $nn.set                  #####[: cur written
-         $nn.get syscall/iovec//len.get #####[: cur written (cur.len)
-         swap -                         #####[: cur (cur.len-written)
-         $nn.get swap                   #####[: cur cur (cur.len-written)
-         syscall/iovec//len.set         #####[: cur
-         0 0                            #####[: cur 0=changed-cur 0=remaining
-     ]
-     if                                ###[: cur! changed-cur remaining  # the ! to signify potential modification
-     
-     # repeat if there is still written characters to account for
-     
-     dup dup                           ###[: cur! changed-cur remaining remaining remaining
-     [ pop swap pop ] $.callIf         ###[: cur! remaining | cur! changed-cur remaining remaining
-     $inner.jumpIf                     ###[: cur! remaining | cur! changed-cur remaining
-     
-     pop                               ###[: cur! changed-cur
-     
-     # update count of remaining iovecs if cur changed
-     
-     $n.get swap - $n.set              ###[: cur!
-     
-     $cur.set                          ###[:
-     
-     $loop.jump
-  ]                            #[: string... n <required-iovec-array-size> <todo>
+  # determine the size of the
+  # stack-buffer we need for
+  # the iovec array
+  # 
+  syscall/iovec.size *         #[: ss... <iovec-array-size>
   
-  swap                         #[: string... n <todo> <required-iovec-array-size>
-  stack/call-with-stack-buffer #[: 0 | err
+  [
+    { $escape }
+    
+    $escape.set
+    
+    [
+      {
+        $iovecs
+        $total
+      }
+      
+      #                          ##[: ss... <buffer>
+      $iovecs.set                ##[: ss...
+      0 $total.set               ##[: ss...
+      
+      # write the strings on the stack
+      # into our iovec array from back
+      # to front
+      #
+      $n.get                     ##[: ss... n
+      [
+        { $iovec }
+        #                        ###[: ss... <index>
+        $n.get swap - decr       ###[: ss... <reversed-index>
+        syscall/iovec.size *     ###[: ss... <nth-iovec-offset>
+        $iovecs.get +            ###[: ss... <nth-iovec>
+        $iovec.copy              ###[: ss... <nth-iovec>
+        swap                     ###[: ss... <nth-iovec> <s> (pops one string off the stack)
+        dup                      ###[: ss... <nth-iovec> <s> <s>
+        strings/length           ###[: ss... <nth-iovec> <s> <s-len>
+        $iovec.get               ###[: ss... <nth-iovec> <s> <s-len> <nth-iovec>
+        swap                     ###[: ss... <nth-iovec> <s> <nth-iovec> <s-len>
+        dup [+] $total.update    ###[: ss... <nth-iovec> <s> <nth-iovec> <s-len>
+        syscall/iovec//len.set   ###[: ss... <nth-iovec> <s>
+        syscall/iovec//base.set  ###[: ss...
+      ]                          ##[: ss... n <todo>
+      for-range                  ##[: 
+      
+      # loop
+      #   write it
+      #     on error fix up the stack and escape
+      #     on remaining fix up the iovecs and continue
+      #     on complete fix up the stack and escape
+      #
+      [
+        syscall/STDOUT                          ###[: fd
+        $iovecs.get                             ###[: fd iovecs
+        $n.get                                  ###[: fd iovecs num-iovecs
+        syscall/writev                          ###[: written err
+        
+        dup 0 !=                                ###[: written err <err!=0>
+        [                                       
+          "we need to update the iovecs" panic  ####[: written err
+          swap pop $escape.get call             ####[: <> err
+        ]
+        when                                    ###[: written <err=0>
+        
+        # update the total remaining
+        # and keep a copy of it
+        #
+        pop                                     ###[: written
+        dup [swap - dup] $total.update          ###[: written <total-remaining>
+        
+        # if there is 0 total remaining
+        # don't bother updating the iovecs
+        # just leave
+        # 
+        0 ==                                    ###[: written <tr==0>
+        [
+           pop 0 $escape.get call               ####[: <> 0
+        ]
+        when                                    ###[: written
+        
+        # while written > next iovec
+        # sub its value from written and remove it
+        # 
+        [ dup $iovecs.get syscall/iovec//len.get > ]
+        [
+          #                                     ####[: written
+          $iovecs.get syscall/iovec//len.get -  ####[: written=<written - amount in current iovec len>
+          [syscall/iovec.size +] $iovecs.update ####[: written  # (we move iovec ahead one entry
+        ]
+        while
+        
+        # if there is any written remaining,
+        # sub it from the next iovec before looping
+        #
+        dup 0 >
+        [
+          $iovecs.get [-] syscall/iovec//len.update ####[: (empty) # we consume the rest of written updating current iovec/len
+          0                                         ####[: 0
+        ]
+        when
+      ]
+      loop
+    ]                            #[: ss... <iovec-array-size> <todo-with-stack-iovec>
+    swap                         #[: ss... <todo-with-stack-iovec> <iovec-array-size>
+    stack/call-with-stack-buffer #[: err <>
+  ] stack/with-escape
+  
 ;

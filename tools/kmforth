@@ -4221,6 +4221,10 @@ def generate_code(
                         localvar.implementation_get( code )
                     elif memberfn == 'set':
                         localvar.implementation_set( code )
+                    elif memberfn == 'update':
+                        localvar.implementation_update( code )
+                    elif memberfn == 'call':
+                        localvar.implementation_call( code )
                     elif memberfn == 'copy':
                         localvar.implementation_copy( code )
                     elif memberfn == 'here':
@@ -4459,27 +4463,27 @@ class LocalVarFns:
                 - lastFrameOffsets.localvar_slotno( self._localVarName ),
         )
 
+    def _require_slot_sized( self, getSizeFn, name ):
+        if getSizeFn( name ) != 8:
+            a = 'you can only .get, .set, .update, .call and .here vars of size 8. other sizes only offer .addr, '
+            b = 'found %s in %s which is size %s' % (
+                repr( name ),
+                repr( unmangle( self._fn ) ),
+                repr( getSizeFn( name ) ) ,
+            )
+            raise Exception( a + b )
+    
     def implementation_get( self, code ):
         if self._indirections:
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
-            if parentOffsets.localvar_size( self._localVarName ) != 8:
-                raise Exception(
-                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                        repr( command ) ,
-                    )
-                )
+            self._require_slot_sized( parentOffsets.localvar_size, self._localVarName )
             code.append( '   ; push nonlocal (%s) to datastack\n' % repr( self._localVarName ) )
             code.append( '   mov rax, %s\n' % addr )
             code.append( '   mov qword [r14], rax\n' )
             code.append( '   add r14, 8\n' )
             return
         else:
-            if self._frameOffsets.localvar_size( self._localVarName ) != 8:
-                raise Exception(
-                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                        repr( command ) ,
-                    )
-                )
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
             code.append( '    ; push local (%s) to datastack\n' % repr( self._localVarName ) )
             code.append( '    mov rax, [r15-8*%d]\n' % (self._slotno) )
             code.append( '    mov qword [r14], rax\n' )
@@ -4488,47 +4492,79 @@ class LocalVarFns:
     def implementation_set( self, code ):
         if self._indirections:
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
-            if parentOffsets.localvar_size( self._localVarName ) != 8:
-                raise Exception(
-                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                        repr( command ) ,
-                    )
-                )
+            self._require_slot_sized( parentOffsets.localvar_size, self._localVarName )
             code.append( '    ; pop datastack storing to nonlocal (%s)\n' % repr( self._localVarName ))
             code.append( '    sub r14, 8\n')
             code.append( '    mov rbx, [r14]\n' )
             code.append( '    mov qword %s, rbx\n' % addr )
         else:
-            if self._frameOffsets.localvar_size( self._localVarName ) != 8:
-                raise Exception(
-                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                        repr( command ) ,
-                    )
-                )
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
             code.append( '    ; pop datastack storing to local (%s)\n' % ( repr( self._localVarName ) ) )
             code.append( '    sub r14, 8\n' )
             code.append( '    mov rax, [r14]\n' )
             code.append( '    mov qword [r15-8*%d], rax\n' % (self._slotno) )
-
+            
+    def implementation_update( self, code ):
+        if self._indirections:
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            self._require_slot_sized( parentOffsets.localvar_size, self._localVarName )
+            label = '.km_update_nonlocal_' + str(self._uniques.get())
+            code.append('    ; update value of nonlocal %s by getting, invoking and setting\n' % repr( self._localVarName ))
+            code.append('    mov rbx, [r14-8]\n')
+            code.append('    mov rax, %s\n' % addr)
+            code.append('    mov [r14-8], rax\n')
+            code.append('    mov qword [r15], %s\n' % label)
+            code.append('    add r15, 8\n')
+            code.append('    jmp rbx\n')
+            code.append(' %s:\n' % label)
+            # recalculate addr because we don't have anywhere to save it and registers aren't save across calls
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            code.append('    mov rbx, [r14-8]\n')
+            code.append('    sub r14, 8\n')
+            code.append('    mov qword %s, rbx\n' % addr)
+            code.append('    ; end non-local update\n')
+        else:
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
+            label = '.km_update_local_' + str(self._uniques.get())
+            code.append('    ; update value of local %s by getting, invoking and setting\n' % repr( self._localVarName ))
+            code.append('    mov rbx, [r14-8]\n')
+            code.append('    mov rax, [r15+8*%d]\n' % (- self._slotno))
+            code.append('    mov qword [r14-8], rax\n')
+            code.append('    mov qword [r15], %s\n' % label)
+            code.append('    add r15, 8\n')
+            code.append('    jmp rbx\n')
+            code.append(' %s:\n' % label)
+            code.append('    mov rax, [r14-8]\n')
+            code.append('    sub r14, 8\n')
+            code.append('    mov qword [r15+8*%d], rax\n' % (- self._slotno))
+            code.append('    ; end local update\n')
+    
+    def implementation_call( self, code ):
+        if self._indirections:
+            parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            self._require_slot_sized( parentOffsets.localvar_size, self._localVarName )
+            label = '.km_call_nonlocal_' + str(self._uniques.get())
+            code.append( '    mov qword [r15], %s\n' % label )
+            code.append( '    add r15, 8\n' )
+            code.append( '    jmp %s\n' % addr )
+            code.append( ' %s:\n' % label )
+        else:
+            label = '.km_call_local_' + str(self._uniques.get())
+            code.append( '    mov rbx, [r15+8*%d]\n' % (- self._slotno))
+            code.append( '    mov qword [r15], %s\n' % label )
+            code.append( '    add r15, 8\n' )
+            code.append( '    jmp rbx\n' )
+            code.append( ' %s:\n' % label )
+    
     def implementation_copy( self, code ):
         if self._indirections:
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
-            if parentOffsets.localvar_size( self._localVarName ) != 8:
-                raise Exception(
-                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                        repr( command ) ,
-                    )
-                )
+            self._require_slot_sized( parentOffsets.localvar_size, self._localVarName )
             code.append( '    ; copy top of datastack to nonlocal (%s)\n' % ( repr( self._localVarName ) ) )
             code.append( '    mov rbx, [r14-8]\n' )
             code.append( '    mov qword %s, rbx\n' % addr )
         else:
-            if self._frameOffsets.localfn_size( self._localVarName ) != 8:
-                raise Exception(
-                    'you can only .copy to locals of size 8. other sizes only offer .addr, found %s' % (
-                        repr( command ) ,
-                    )
-                )
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
             code.append( '    ; copy datastack to local (%s)\n' % ( repr( self._localVarName ) ) )
             code.append( '    mov rax, [r14-8]\n' )
             code.append( '    mov qword [r15-8*%d], rax\n' % (self._slotno) )
@@ -4540,23 +4576,13 @@ class LocalVarFns:
             # I'll allow it
             #
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
-            if parentOffsets.localvar_size( self._localVarName ) != 8:
-                raise Exception(
-                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                        repr( command ) ,
-                    )
-                )
+            self._require_slot_sized( self._parentOffsets.localvar_size, self._localVarName )
             label = '.km_here_nonlocal_' + str(self._uniques.get())
             code.append( '    ; set local (%s) to label following this command\n' % repr(self._localVarName) )
             code.append( '    mov qword %s, %s\n' % (addr, label))
             code.append( '    %s:\n' % label )
         else:
-            if self._frameOffsets.localvar_size( self._localVarName ) != 8:
-                raise Exception(
-                    'you can only .get, .set and .here locals of size 8. other sizes only offer .addr, found %s' % (
-                        repr( command ) ,
-                    )
-                )
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
             label = '.km_here_' + str(self._uniques.get())
             code.append( '    ; set local (%s) to label following this command\n' % repr(self._localVarName))
             code.append( '    mov qword [r15-8*%d], %s\n' % ( (self._slotno), label) )
@@ -4565,9 +4591,11 @@ class LocalVarFns:
     def implementation_jump( self, code ):
         if self._indirections:
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            self._require_slot_sized( parentOffsets.localvar_size, self._localVarName )
             code.append( '    jump %s\n' % addr )
         else:
-            code.append( '    jmp [r15+8*%d]\n' % (- self._slotno) )
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
+            code.append( '    jmp qword [r15+8*%d]\n' % (- self._slotno) )
         
     def implementation_jumpIf( self, code ):
         if self._indirections:
@@ -4577,9 +4605,11 @@ class LocalVarFns:
             code.append( '    test rbx,rbx\n' )
             code.append( '    jz %s\n' % label )
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            self._require_slot_sized( parentOffsets.loclvar_size, self._localVarName )
             code.append( '    jmp %s\n' % addr )
             code.append( '%s:\n' % label )
         else:
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
             label = '.km_dont_jumpif_' + str(self._uniques.get())
             code.append( '    sub r14,8\n' )
             code.append( '    mov rax,[r14]\n' )
@@ -4604,18 +4634,22 @@ class LocalVarFns:
     def implementation_incr( self, code ):
         if self._indirections:
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            self._require_slot_sized( parentOffsets.localvar_size, self._localVarName )
             code.append( '    ; incr nonlocal (%s) in-place\n' % repr( self._localVarName ) )
             code.append( '    inc qword %s\n' % addr )
         else:
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
             code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
             code.append( '    inc qword [r15-8*%d]\n' % (self._slotno) )
 
     def implementation_decr( self, code ):
         if self._indirections:
             parent, parentOffsets, addr = self._walk_to_target_frame( code )
+            self._require_slot_sized( parentOffsets.localvar_size, self._localVarName )
             code.append( '    ; decr nonlocal (%s) in-place\n' % repr( self._localVarName ) )
             code.append( '    dec qword %s\n' % addr )
         else:
+            self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
             code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
             code.append( '    dec qword [r15-8*%d]\n' % (self._slotno) )
     

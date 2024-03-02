@@ -13,3 +13,6 @@
 
 # file opening option codes current linux
   https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/fcntl.h
+
+# https://blog.rchapman.org/posts/Linux_System_Call_Table_for_x86_64/
+  what the link says

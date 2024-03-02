@@ -12,5 +12,5 @@
   " "
   "friend"
   "."
-  10 write-strings
+  10 syscall/STDOUT write-strings
 ;

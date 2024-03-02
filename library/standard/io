@@ -117,7 +117,7 @@
 # [: "string"
 # [: -
 # 
-:print "\n" 2 write-strings [ "PRINTERROR" log 1 exit ] $.callIf ;
+:print "\n" 2 syscall/STDOUT write-strings [ 200 exit ] $.callIf ;
 
 # print a number or die on failure
 # 
@@ -167,25 +167,17 @@
   0                        # [: 0
 ;
 
-# panics on log write error
-# 
 # [: "string"
 # [:
 # 
-:log
-       syscall/STDERR -write-all [ 203 syscall/exit ] $.callIf
-  "\n" syscall/STDERR -write-all [ 204 syscall/exit ] $.callIf
-;
+:log "\n" 2 syscall/STDERR write-strings [ 203 exit ] $.callIf ;
 
 # does not return
 # 
 # [: "string"
 # n/a
 # 
-:panic 
-  log
-  syscall/STDERR syscall/exit
-;
+:panic log 1 exit ;
 
 # does not return
 # 
@@ -201,13 +193,15 @@
 # output ordering is FIFO, not stack-backwards
 # [: "hello" ", " "there" 3 write-strings --> "hello, there"
 # 
-#[: string... numstrings
+#[: string... numstrings fd
 #[: err
 #
 :write-strings
   {
-    $n
+    $n $fd
   }
+
+  $fd.set
 
   # if there are no strings, don't bother
   # 
@@ -266,7 +260,7 @@
       #     on complete fix up the stack and escape
       #
       [
-        syscall/STDOUT                          ###[: fd
+        $fd.get                                 ###[: fd
         $iovecs.get                             ###[: fd iovecs
         $n.get                                  ###[: fd iovecs num-iovecs
         syscall/writev                          ###[: written err

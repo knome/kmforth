@@ -25,7 +25,7 @@ G_INLINE_EXCEPT = None
 NUMBERS  = set( '0123456789' )
 LETTERS  = set( 'abcdefghijklmnopqrstuvzwxyz' )
 
-WORDSTART = LETTERS.union( set('_+-/*<>-%=.@!') )
+WORDSTART = LETTERS.union( set('_+-/*<>-%=.@!~') )
 WORDBITS  = WORDSTART.union( NUMBERS )
 
 STRUCTBITS = ':;[]{}()'
@@ -1014,7 +1014,7 @@ def unmangle( name ):
     
     if name.startswith( 'kmlambda'):
         # lambdas aren't mangled and it is useful to
-        # call this were lambdas and functions are combined
+        # call this where lambdas and functions are combined
         return name
     
     while ss.peek() != None:
@@ -1209,6 +1209,8 @@ class BodyDetails:
         for command in self._commands:
             if command.kind() == 'localfn':
                 if not command.value().startswith('$.'):
+                    if '.' not in command.value():
+                        raise Exception( 'malformed localfn or localvar: %s' % repr( command ) )
                     name, _ = command.value().split('.',1)
                     if not self.has_local(name):
                         yield name
@@ -4137,7 +4139,7 @@ def generate_code(
                 rt = '.' + fn + '_' + str( nn )
                 nn = nn + 1
                 
-                code.append( '    ; calling %s\n' % command.value() )
+                code.append( '    ; calling %s\n' % unmangle(command.value()) )
                 code.append( '    mov qword [r15], %s\n' % rt )
                 code.append( '    add r15, 8\n' )
                 code.append( '    jmp ' + command.value() + '\n' )

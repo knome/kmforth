@@ -1,0 +1,7 @@
+
+@ "standard" ;
+
+:main
+   0 "sir does not appear in this error message" errno/panic-on-error
+   400 "some error" errno/panic-on-error
+;

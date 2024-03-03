@@ -2,7 +2,7 @@
 @ "standard" ;
 
 :main
-  10000 memory/map-region "narp" or-die
+  10000 memory/map-region "narp" errno/panic-on-error
   dup                # [: range range
   "hello, world"     # [: range range "hw"
   dup                # [: range range "hw" "hw"

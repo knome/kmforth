@@ -1,0 +1,50 @@
+[tell]
+err:
+no error, operation succeeded
+position:
+0
+
+err:
+no error, operation succeeded
+
+[tell]
+err:
+no error, operation succeeded
+position:
+5
+
+[seek-and-check]
+err:
+no error, operation succeeded
+arrived:
+1
+
+[tell]
+err:
+no error, operation succeeded
+position:
+3
+
+[seek-and-check]
+err:
+no error, operation succeeded
+arrived:
+1
+
+[tell]
+err:
+no error, operation succeeded
+position:
+0
+
+[seek-and-check]
+err:
+no error, operation succeeded
+arrived:
+0
+
+[tell]
+err:
+no error, operation succeeded
+position:
+5

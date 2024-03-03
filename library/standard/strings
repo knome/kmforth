@@ -42,6 +42,21 @@
   strings/number-buffer//bytes.nth.addr
 ;
 
+#[: value todo -> (value-as-string todo)
+#
+:strings/with-unsigned-as-string
+  { $todo }
+  
+  $todo.set
+  
+  strings/number-buffer.size
+  [
+    { $buffer } $buffer.copy
+    strings/unsigned-to-ascii $todo.call
+  ]
+  stack/with-stack-buffer
+;
+
 :strings/length
   `
   sub r14, 8             ; pop the pointer to the string

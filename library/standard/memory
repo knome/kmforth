@@ -102,6 +102,21 @@
   while
 ;
 
+# inefficient memset
+# 
+# [: count unsigned-char dst
+: memory/memset
+  {$dst $v} $dst.set $v.set
+  
+  #[: passthrough count on stack
+  
+  [
+    $v.get $dst.get memory/poke-b
+    $dst.incr
+  ]
+  repeat
+;
+
 # # [: bitIndex &bitmap
 # # [: 
 # # 

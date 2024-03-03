@@ -1,0 +1,159 @@
+
+% cursor/StringCursor (@rc @st)
+  @ @rc @st (
+    (definition type/u64)
+    (string     type/u64)
+    (position   type/u64)
+    (closed     type/u64) # change to "flags" later if we need more
+  );
+;
+
+@ struct/define cursor/StringCursor ;
+
+# [: todo
+# [: (cursors todo)
+:string-cursor/with-string-cursors
+  { $todo-with-string-cursors } $todo-with-string-cursors.set
+  
+  # sets up an indirection structure for use with string cursors
+  [
+    {$string-cursor-definition} $string-cursor-definition.set
+    
+    &string-cursor/StringCursor/read  $string-cursor-definition.get ~cursor/CursorDefinition//read.set
+    &string-cursor/StringCursor/write $string-cursor-definition.get ~cursor/CursorDefinition//write.set
+    &string-cursor/StringCursor/tell  $string-cursor-definition.get ~cursor/CursorDefinition//tell.set
+    &string-cursor/StringCursor/seek  $string-cursor-definition.get ~cursor/CursorDefinition//seek.set
+    &string-cursor/StringCursor/start $string-cursor-definition.get ~cursor/CursorDefinition//start.set
+    &string-cursor/StringCursor/close $string-cursor-definition.get ~cursor/CursorDefinition//close.set
+    
+    # define new string cursor function
+    # 
+    # [: string todo
+    # 
+    [ {$todo-with-cursor} $todo-with-cursor.set
+      
+      cursor/StringCursor.size
+      [
+        { $cursor } $cursor.set
+        
+        $string-cursor-definition.get $cursor.get cursor/StringCursor//definition.set
+        $cursor.get cursor/StringCursor//string.set
+        0 $cursor.get cursor/StringCursor//position.set
+        0 $cursor.get cursor/StringCursor//closed.set
+        
+        $cursor.get $todo-with-cursor.call
+      ]
+      stack/with-stack-buffer
+    ]
+    
+    # this receives the $with-string-cursor function
+    $todo-with-string-cursors.call
+  ]
+  ~cursor/with-definition
+;
+
+:string-cursor/StringCursor/read
+  { $amount $buffer $cursor }
+  $cursor.set
+  $buffer.set
+  $amount.set
+  
+  "READ FROM STRING" log
+  
+  0
+;
+
+:string-cursor/StringCursor/write
+  { $amount $buffer $cursor }
+  $cursor.set
+  $buffer.set
+  $amount.set
+  
+  "WRITE TO STRING" log
+  
+  0
+;
+
+# cursor -> position err
+:string-cursor/StringCursor/tell
+  dup cursor/StringCursor//closed.get
+  [
+    pop 0 "cursor closed"
+  ]
+  [
+    cursor/StringCursor//position.get 0
+  ]
+  if
+;
+
+# position cursor -> err
+:string-cursor/StringCursor/seek
+  { $position $cursor }
+  
+  $cursor.set
+  $position.set
+  
+  $cursor.get cursor/StringCursor//closed.get
+  [
+    "cursor closed"
+  ]
+  [
+    $cursor.get cursor/StringCursor//position.get $position.get is-bigger-than-or-equal-to
+    [
+      # if the current position is >= the requested one, we can just without scanning
+      
+      $position.get $cursor.get cursor/StringCursor//position.set
+      0
+    ]
+    [
+      # otherwise, we need to scan forward so if we run into the end of the string, we can stop early
+      
+      { $p $s }
+      
+      $cursor.get cursor/StringCursor//position.get $p.set
+      $cursor.get cursor/StringCursor//string.get $s.set
+      
+      [
+        {$escape} $escape.set
+        
+        $position.get $p.get -
+        [
+          $s.get memory/peek-b
+          [
+            $s.incr
+            $p.incr
+          ]
+          [
+            # we've reached the end of the string, stop advancing
+            # it is not an error to reach the end and stop
+            # the caller must seek and then tell to be sure the seek worked
+            # we can introduce a checking helper on the cursor class to assist with this
+            
+            $escape.call
+          ]
+          if
+        ]
+        repeat
+      ]
+      stack/with-escape
+      
+      $p.get $cursor.get cursor/StringCursor//position.set
+    ]
+    if
+  ]
+  if
+;
+
+:string-cursor/StringCursor/start
+  "SEEK STRING START" log
+  0
+;
+
+:string-cursor/StringCursor/end
+  "SEEK STRING END" log
+  0
+;
+
+:string-cursor/StringCursor/close
+  "CLOSE STRING" log
+;

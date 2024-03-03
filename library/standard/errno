@@ -16,37 +16,85 @@
 ;
 
 # terrifically inefficient, eh?
+# [: err todo -> (errno-string todo)
 # 
 % errno/-define-strerror (@errors)
-  : errno/strerror { $desc }
+  : errno/with-errno-string { $err $todo $desc }
     
-    #                          # [: err
-    "unknown error"            # [: err defaultMsg
-    $desc.set                  # [: err
+    $todo.set
+    $err.set
+    0 $desc.set
     
-    @( (@errors) 
-       (@error.each)
-       
-       @( (@error)
-          ((@name @value @description))
+    $err.get 1024 is-bigger-than
+    [
+      # assume it is a string and not an error value
+      $err.get $todo.call
+    ]
+    [
+      @( (@errors) 
+         (@error.each)
+         
+         @( (@error)
+            ((@name @value @description))
+            
+            $err.get @value ==
+            [
+              @description $desc.set
+            ]
+            when
+         )
+      )
+      
+      $desc.get 0 ==
+      [
+        { $prefix $prefixlen }
+        
+        "unknown error: " $prefix.copy
+        strings/length $prefixlen.set
+        
+        $err.get
+        [
+          { $serr $serrlen}
           
-          dup                  # [: err err
-          $desc.get            # [: err err curMsg
-          swap                 # [: err curMsg err
-          @value ==            # [: err curMsg isThisError
+          $serr.copy
+          strings/length $serrlen.set
+          
+          $prefixlen.get $serrlen.get + 1 +
           [
-            #            # [: err curMsg
-            pop          # [: err
-            @description # [: err newMsg
-          ]                    # [: err curMsg isThisError onIsThisError
-          $.callIf             # [: err curMsg | err newMsg {on called}
-          $desc.set            # [: err {keep the selected message or set the new one}
-       )
-    )
-    
-    pop                        # [:
-    $desc.get                  # [: curMsg
+            { $buffer }
+            
+            $buffer.set
+            
+            $buffer.get $prefix.get $prefixlen.get memory/memmove
+            $buffer.get $prefixlen.get + $serr.get $serrlen.get memory/memmove
+            0 $buffer.get $prefixlen.get + $serrlen.get + memory/poke-b
+            
+            $buffer.get $todo.call
+          ]
+          stack/with-stack-buffer
+        ] strings/with-unsigned-as-string
+      ]
+      [
+        $desc.get $todo.call
+      ]
+      if
+    ]
+    if
   ;
+;
+
+#[: message err -> (dead)
+:errno/panic-on-error
+  { $message $err } $message.set $err.set
+  
+  $err.get 0 !=
+  [
+    $err.get
+    [ { $strerrno } $strerrno.set
+      "[errno/panic-on-error] message='" $message.get "' : error='" $strerrno.get "'\n" 5 panic-strings
+    ] errno/with-errno-string
+  ]
+  when
 ;
 
 # we can create expansion rules for taking lengths and maximums from macrolists
@@ -67,6 +115,7 @@
 ;
 
 @ errno/-define-errors (
+  (esuccess    0x00 "no error, operation succeeded")
   (eperm       0x01 "operation not permitted")
   (enoent      0x02 "no such file or directory")
   (esrch       0x03 "no such process")

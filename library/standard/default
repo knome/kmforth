@@ -10,5 +10,7 @@
 @ "./structs" ;
 @ "./gcarena" ;
 @ "./strings" ;
-@ "./cursor" ;
 @ "./networking" ;
+
+@ "./cursor" ;
+@ "./string-cursor" ;

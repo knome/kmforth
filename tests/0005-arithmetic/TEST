@@ -2,5 +2,5 @@
 @ "standard" ;
 
 :main
-  5 3 % 2 ==  not "bad math" or-die
+  5 3 % 2 == not "bad math" errno/panic-on-error
 ;

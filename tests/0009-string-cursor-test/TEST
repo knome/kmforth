@@ -1,0 +1,95 @@
+
+@ "standard" ;
+
+:main { $s }
+  "hello" $s.set
+  
+  [
+    { $with-string-cursor } $with-string-cursor.set
+    
+    $s.get
+    [
+      { $sc } $sc.set 
+      
+      "[tell]" print
+      $sc.get ~cursor/tell
+      "err:" print
+      printerr
+      "position:" print
+      printno
+      
+      "" print
+
+      # "[seek]" print
+      42 $sc.get ~cursor/seek
+      "err:" print
+      printerr
+
+      "" print
+
+      "[tell]" print
+      $sc.get ~cursor/tell
+      "err:" print
+      printerr
+      "position:" print
+      printno
+
+      "" print
+
+      "[seek-and-check]" print
+      3 $sc.get ~cursor/seek-and-check
+      "err:" print
+      printerr
+      "arrived:" print
+      printno
+
+      "" print
+
+      "[tell]" print
+      $sc.get ~cursor/tell
+      "err:" print
+      printerr
+      "position:" print
+      printno
+
+      "" print
+
+      "[seek-and-check]" print
+      0 $sc.get ~cursor/seek-and-check
+      "err:" print
+      printerr
+      "arrived:" print
+      printno
+
+      "" print
+
+      "[tell]" print
+      $sc.get ~cursor/tell
+      "err:" print
+      printerr
+      "position:" print
+      printno
+
+      "" print
+
+      "[seek-and-check]" print
+      10 $sc.get ~cursor/seek-and-check
+      "err:" print
+      printerr
+      "arrived:" print
+      printno
+
+      "" print
+
+      "[tell]" print
+      $sc.get ~cursor/tell
+      "err:" print
+      printerr
+      "position:" print
+      printno
+
+    ]
+    $with-string-cursor.call
+  ]
+  string-cursor/with-string-cursors
+;

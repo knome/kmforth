@@ -1,0 +1,81 @@
+
+# let's explore some manually defined generics
+
+% ~cursor/Cursor (@rc @st)
+  @ @rc @st (
+    (definition type/u64)
+  );
+;
+
+@ struct/define ~cursor/Cursor ;
+
+% ~cursor/CursorDefinition (@rc @st)
+  @ @rc @st (
+    (read  type/pointer) # amount buffer cursor -> err
+    (write type/pointer) # amount buffer cursor -> err
+    (tell  type/pointer) # cursor -> position err
+    (seek  type/pointer) # signed-offset cursor -> err
+    (start type/pointer) # cursor -> err
+    (end   type/pointer) # cursor -> err
+    (close type/pointer) # cursor
+  );
+;
+
+@ struct/define ~cursor/CursorDefinition ;
+
+# todo
+# (blank-definition todo)
+:~cursor/with-definition
+  ~cursor/CursorDefinition.size
+  [
+    { $cursor } $cursor.set
+    
+    ~cursor/CursorDefinition.size 0 $cursor.get memory/memset
+    $cursor.get swap call
+  ]
+  stack/with-stack-buffer
+;
+
+# base common functions
+
+# amount raw-buffer cursor -> (amount raw-buffer cursor definition-call) -> err
+: ~cursor/read.raw dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//read.call ;
+
+# amount raw-buffer cursor -> err
+: ~cursor/write.raw dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//write.call ;
+
+: ~cursor/read.buffer "~cursor/read.buffer unimplemented" panic;
+
+: ~cursor/write.buffer "~cursor/write.buffer unimplemented" panic ;
+
+# cursor -> position err
+: ~cursor/tell  dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//tell.call  ;
+
+# position cursor -> err
+: ~cursor/seek  dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//seek.call  ;
+
+# cursor -> <>
+: ~cursor/close dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//close.call ;
+
+# extensions
+
+# uses tell to check if the seek actually made it where it was going
+# position cursor -> arrived err
+: ~cursor/seek-and-check
+  { $cursor $position } $cursor.set $position.set
+  [ { $escape } $escape.set
+    $position.get $cursor.get ~cursor/seek
+    dup [ 0 swap $escape.call ] when
+    pop
+    $cursor.get ~cursor/tell
+    dup [ $escape.call ] when
+    pop
+    $position.get == 0
+  ] stack/with-escape
+;  
+
+# cursor -> u64 err
+: ~cursor/u64 ~cursor/Cursor//definition.get "u64 stuff" panic ;
+
+# cursor/u32 -> u32 err
+: ~cursor/u32 ~cursor/Cursor//definition.get "u32 stuff" panic ;

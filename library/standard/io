@@ -3,71 +3,6 @@
 # simple commands interface
 # 
 
-# later we can check if the value
-# is greater than 4096 or something
-# and figure it's a string pointer
-# if so, and otherwise assume it
-# is an errno and do an appropriate
-# lookup.
-# 
-# we might be able to introduce
-# another magic local function that
-# allows you to get the location of
-# the calling frame, causing it to
-# be passed in all secret like.
-# 
-# { $hello }
-# 
-# $hello.caller # causes a value to be pushed to stack and popped into a hidden local
-#               # that will then be mov'd into the given local on command. complicates
-#               # the caller a bit, and adds a bunch of little strings indicating
-#               # where an error occurred, but it would be pretty useful
-# 
-# we could add a fn.needs_caller() to the function object to keep track of this
-# 
-# [: err message
-# 
-:or-die { $err }
-  swap                   # [: message err
-  dup $err.set           # [: message err
-  not dup                # [: message (!err) (!err)
-  [ swap pop ] $.callIf  # [: message (!err) | (!err) {called}
-  $.leaveIf              # [: message | {leaves with empty stack on no error}
-  
-  # THERE IS AN ERROR, WE DIE HERE
-  
-  "FATAL-ERROR" log      # [: message
-  log                    # [: 
-  $err.get               # [: err
-  
-  # guess that any value under 1024 is an errno
-  # any value over that is assumed to be a pointer to a string
-  # 
-  dup 1024 is-lesser-than  # [: err isErrno=(err<1024)
-  dup                      # [: err isErrno isErrno
-  
-  # print the error if it is an errno
-  # 
-  [ { $isErrno }
-    #                  # [: err isErrno
-    $isErrno.set       # [: err 
-    dup errno/strerror # [: err string
-    log                # [: err
-    $isErrno.get       # [: err isErrno
-  ]                      # [: err isErrno isErrno onIsErrno
-  $.callIf               # [: err isErrno {called or skipped}
-  
-  # print the error if it is a string
-  # 
-  not                    # [: err (!isErrno)
-  [ dup log ]            # [: err (!isErrno) onNotErrno
-  $.callIf               # [: err | err {we dup to keep the stack the same either way}
-  
-  pop # we could not dup and let the stack be inconsistent when we panic, but no
-  
-  "" panic
-;
-
 # [: filename
 # [: fd err
 # 
@@ -134,6 +69,15 @@
   stack/with-stack-buffer
 ;
 
+# an err can be a system errno or a string
+# this determines it and looks it up, printing whatever
+# 
+# [: err
+# 
+:printerr
+  &print errno/with-errno-string
+;
+
 # [: "string" fd
 # [: err
 # 
@@ -180,6 +124,9 @@
 # n/a
 # 
 :panic log 1 exit ;
+
+# ss... n
+:panic-strings "\n" swap incr syscall/STDERR write-strings pop 1 exit ;
 
 # does not return
 # 

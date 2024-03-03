@@ -125,11 +125,13 @@
 # [: -
 # 
 :printno
+  strings/number-buffer.size 
   [
                               # [: value buffer=(number-buffer (tmp, on callstack))
     strings/unsigned-to-ascii # [: <string-pointer>
     print                     # [:
-  ] strings/number-buffer.size stack/call-with-stack-buffer
+  ]
+  stack/with-stack-buffer
 ;
 
 # [: "string" fd
@@ -307,8 +309,7 @@
       ]
       loop
     ]                            #[: ss... <iovec-array-size> <todo-with-stack-iovec>
-    swap                         #[: ss... <todo-with-stack-iovec> <iovec-array-size>
-    stack/call-with-stack-buffer #[: err <>
+    stack/with-stack-buffer #[: err <>
   ] stack/with-escape
   
 ;

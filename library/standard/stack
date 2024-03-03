@@ -168,10 +168,11 @@
   $.call
   ;
 
-# [: todo size
+# [: size todo
 # <calls: buffer todo>
 # [: <whatever-todo-did>
-:stack/call-with-stack-buffer
+:stack/with-stack-buffer
+  swap
   dup 8 %              # [: todo size <is-size-not-modulo-8>
   [
     dup    # [: todo size size

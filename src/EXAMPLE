@@ -7,6 +7,7 @@
   
   [ [ 100 exit ] when pop ] $onErrDie.set
 
+  4096 16 *
   [ {$buffer $cursor $len}
     
     $buffer.copy
@@ -30,6 +31,5 @@
     
     [ $buffer.get $len.get 1 $sw.call $onErrDie.call ] loop
   ]
-  4096 16 *
-  stack/call-with-stack-buffer
+  stack/with-stack-buffer
 ;

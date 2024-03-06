@@ -2,15 +2,15 @@
 @ "standard" ;
 
 :main
-  [ { $with-buffer-cursor $with-string-cursor }
+  [ { -- $with-buffer-cursor $with-string-cursor }
     $with-buffer-cursor.set
     $with-string-cursor.set
     
     "hello, world"
-    [ { $sc } $sc.set
+    [ { -- $sc } $sc.set
     
       1024
-      [ { $bc } $bc.set
+      [ { -- $bc } $bc.set
       
         $bc.get ~cursor/tell "pre-write bc tell failure" errno/panic-on-error
         "position:" print
@@ -46,9 +46,9 @@
 ;
 
 :with-various-cursors
-  { $todo } $todo.set
-  [ { $with-string-cursor } $with-string-cursor.set
-    [ { $with-buffer-cursor } $with-buffer-cursor.set
+  { -- $todo } $todo.set
+  [ { -- $with-string-cursor } $with-string-cursor.set
+    [ { -- $with-buffer-cursor } $with-buffer-cursor.set
       $with-string-cursor.get $with-buffer-cursor.get $todo.call
     ]
     buffer-cursor/with-buffer-cursors

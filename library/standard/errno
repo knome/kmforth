@@ -19,7 +19,7 @@
 # [: err todo -> (errno-string todo)
 # 
 % errno/-define-strerror (@errors)
-  : errno/with-errno-string { $err $todo $desc }
+  : errno/with-errno-string { -- $err $todo $desc }
     
     $todo.set
     $err.set
@@ -47,21 +47,21 @@
       
       $desc.get 0 ==
       [
-        { $prefix $prefixlen }
+        { -- $prefix $prefixlen }
         
         "unknown error: " $prefix.copy
         strings/length $prefixlen.set
         
         $err.get
         [
-          { $serr $serrlen}
+          { -- $serr $serrlen}
           
           $serr.copy
           strings/length $serrlen.set
           
           $prefixlen.get $serrlen.get + 1 +
           [
-            { $buffer }
+            { -- $buffer }
             
             $buffer.set
             
@@ -85,12 +85,12 @@
 
 #[: message err -> (dead)
 :errno/panic-on-error
-  { $message $err } $message.set $err.set
+  { -- $message $err } $message.set $err.set
   
   $err.get 0 !=
   [
     $err.get
-    [ { $strerrno } $strerrno.set
+    [ { -- $strerrno } $strerrno.set
       "[errno/panic-on-error] message='" $message.get "' : error='" $strerrno.get "'" 5 panic-strings
     ] errno/with-errno-string
   ]

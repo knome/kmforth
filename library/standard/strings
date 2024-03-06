@@ -10,7 +10,7 @@
 
 # [: value number-buffer
 # [: <pointer-to-start-of-string-in-buffer>
-:strings/unsigned-to-ascii { $buffer $offset $loop }
+:strings/unsigned-to-ascii { -- $buffer $offset $loop }
   $buffer.set                                 # [: value
   
   strings/number-buffer//bytes.last-index     # [: value <last-index>
@@ -45,13 +45,13 @@
 #[: value todo -> (value-as-string todo)
 #
 :strings/with-unsigned-as-string
-  { $todo }
+  { -- $todo }
   
   $todo.set
   
   strings/number-buffer.size
   [
-    { $buffer } $buffer.copy
+    { -- $buffer } $buffer.copy
     strings/unsigned-to-ascii $todo.call
   ]
   stack/with-stack-buffer

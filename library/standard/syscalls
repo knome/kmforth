@@ -115,7 +115,7 @@
 # [: written err
 # 
 :syscall/write
-  { $fd $length $string }
+  { -- $fd $length $string }
   
   $fd.set
   $string.set
@@ -132,7 +132,7 @@
 # [: read err
 # 
 :syscall/read
-  { $fd $length $buffer }
+  { -- $fd $length $buffer }
   
   $fd.set
   $buffer.set
@@ -188,9 +188,9 @@
 #[: (buffer err todo.call)
 #
 :syscall/with-fstat
-  { $todo $fd } $todo.set $fd.set
+  { -- $todo $fd } $todo.set $fd.set
   syscall/FStat.size
-  [ { $buffer } $buffer.set
+  [ { -- $buffer } $buffer.set
     $buffer.get $fd.get syscall/fstat
     dup
     [
@@ -227,7 +227,7 @@
 # [: openfd protection-bits flags desired-address file-offset mapping-size
 # [: region-addr err
 # 
-:syscall/mmap { $fd $prot $flags $addr $offset $size }
+:syscall/mmap { -- $fd $prot $flags $addr $offset $size }
   $size.set
   $offset.set
   $addr.set
@@ -319,7 +319,7 @@
 
 # [: protocol-family socket-type protocol
 # [: <fd> 0 | 0 <err>
-:syscall/socket { $data }
+:syscall/socket { -- $data }
   syscall/SYSCALL-SOCKET
   syscall/three
 ;

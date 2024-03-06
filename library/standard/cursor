@@ -26,10 +26,10 @@
 # todo
 # (blank-definition todo)
 :~cursor/with-definition 
-  { $todo } $todo.set
+  { -- $todo } $todo.set
   ~cursor/CursorDefinition.size
   [
-    { $cursor } $cursor.set
+    { -- $cursor } $cursor.set
     ~cursor/CursorDefinition.size 0 $cursor.get memory/memset
     $cursor.get $todo.call
   ]
@@ -48,7 +48,7 @@
 
 # amount raw-buffer cursor -> amount-read err
 : ~cursor/write-all
-  { $cursor $raw-buffer $amount $remaining }
+  { -- $cursor $raw-buffer $amount $remaining }
   
   $cursor.set
   $raw-buffer.set
@@ -56,7 +56,7 @@
   
   $amount.get $remaining.set
   
-  [ { $escape } $escape.set
+  [ { -- $escape } $escape.set
     [ $remaining.get 0 is-bigger-than ]
     [
       $remaining.get $raw-buffer.get $cursor.get dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//write.call
@@ -93,7 +93,7 @@
 
 # amount receiving-cursor cursor -> amount-transferred err
 : ~cursor/read-into-cursor
-  { $cursor $receiving-cursor $amount }
+  { -- $cursor $receiving-cursor $amount }
   
   $cursor.set
   $receiving-cursor.set
@@ -103,17 +103,17 @@
   [
     0 0
   ]
-  [ { $written }
+  [ { -- $written }
     0 $written.set
     
-    [ { $escape } $escape.set
+    [ { -- $escape } $escape.set
       $amount.get
-      [ { $buffer $p $remaining }
+      [ { -- $buffer $p $remaining }
         
         $buffer.set
         $buffer.get $p.set
         
-        [ { $read-escape } $read-escape.set
+        [ { -- $read-escape } $read-escape.set
           [ $written.get $amount.get is-smaller-than ]
           [
             $amount.get $written.get - $p.get $cursor.get ~cursor/read  #[: amount-read err
@@ -187,8 +187,8 @@
 # uses tell to check if the seek actually made it where it was going
 # position cursor -> arrived err
 : ~cursor/seek-and-check
-  { $cursor $position } $cursor.set $position.set
-  [ { $escape } $escape.set
+  { -- $cursor $position } $cursor.set $position.set
+  [ { -- $escape } $escape.set
     $position.get $cursor.get ~cursor/seek
     dup [ 0 swap $escape.call ] when
     pop

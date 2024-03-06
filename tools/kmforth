@@ -855,9 +855,23 @@ def parse_body(
     parent  ,
     uniques ,
 ):
-    localvars = parse_optional_locals( tokens )
+    # { args -- locals }
+    # args are just locals that automatically set
+    # 
+    localargs, localvars = parse_optional_locals( tokens )
     
     commands = []
+    
+    # here we insert (in reverse order so right sets first )
+    # localfns for all of the args the function defined
+    # 
+    for arg in reversed( localargs ):
+        commands.append( Token(
+            location = arg.location(),
+            kind     = 'localfn',
+            value    = arg.value() + '.set'
+        ))
+    
     subfns   = []
     while True:
         pt = tokens.peek()
@@ -937,6 +951,7 @@ def parse_body(
     return Body(
         location  = initial.location() ,
         commands  = commands           ,
+        localargs = localargs          ,
         localvars = localvars          ,
         subfns    = subfns             ,
     )
@@ -944,19 +959,28 @@ def parse_body(
 def parse_optional_locals( tokens ):
     pt = tokens.peek()
     if not pt:
-        return []
+        return [],[]
     elif pt.kind() != '{':
-        return []
+        return [],[]
     else:
         tokens.take()
     
-    seen       = set()
-    localNames = []
+    seen      = set()
+    localArgs = []
+    localVars = []
+    
+    dividerSeen = False
     
     while True:
         pt = tokens.peek()
         if pt == None:
             break
+        elif pt.kind() == 'word' and pt.value() == '--':
+            if dividerSeen:
+                raise Exception( 'extra divider in function variable specification: %s' % repr( pt ) )
+            else:
+                tokens.take()
+                dividerSeen = True
         elif pt.kind() != 'localfn':
             break
         else:
@@ -981,11 +1005,17 @@ def parse_optional_locals( tokens ):
             if '.' in vv:
                 raise Exception( 'localfn name cannot contain "." (must be $<size>.<name> or $<name>)' )
             
-            if pt.value() in seen:
+            if vv in seen:
                 raise Exception( 'duplicate localfn name declaration: %s' % repr( pt ) )
-            else:
+            elif dividerSeen:
                 seen.add( vv )
-                localNames.append( (vv,sz) )
+                localVars.append( (vv,sz) )
+            else:
+                if sz != 8:
+                    raise Exception( 'local args can only be size 8, found: %s' % repr( pt ) )
+                seen.add( vv )
+                localArgs.append( pt )
+                localVars.append( (vv,sz) )
     
     ct = tokens.take()
     if not ct:
@@ -993,7 +1023,7 @@ def parse_optional_locals( tokens ):
     elif ct.kind() != '}':
         raise Exception( 'expected } following %s, found %s' % ( repr( pt ), repr( ct ) ) )
     
-    return localNames
+    return localArgs, localVars
 
 def mangle( name ):
     bits = []
@@ -1143,27 +1173,31 @@ class Body:
         return Body(
             location  = self._location  ,
             commands  = new             ,
+            localargs = self._localargs ,
             localvars = self._localvars ,
             subfns    = self._subfns    ,
         )
     
     def rewriting_locals( self, new ):
         return Body(
-            location  = self._location ,
-            commands  = self._commands ,
-            localvars = new            ,
-            subfns    = self._subfns   ,
+            location  = self._location  ,
+            commands  = self._commands  ,
+            localargs = self._localargs ,
+            localvars = new             ,
+            subfns    = self._subfns    ,
         )
     
     def __init__(
         self      ,
         location  ,
         commands  ,
+        localargs ,
         localvars ,
         subfns    ,
     ):
         self._location  = location
         self._commands  = commands
+        self._localargs = localargs
         self._localvars = localvars
         self._subfns    = subfns
         

@@ -1,5 +1,5 @@
 
-:loop { $todo $loop }
+:loop { -- $todo $loop }
   $todo.set
   $loop.here
   $todo.get
@@ -9,7 +9,7 @@
 
 # [: cond todo
 # 
-:while { $test $todo $retry $condRet }
+:while { -- $test $todo $retry $condRet }
   $todo.set    # pop stack into todo local
   $test.set    # pop stack into test local
   
@@ -35,7 +35,7 @@
 # (like C until, executes body before checking cond, rather than cond first)
 # [: todo cond
 # 
-:until { $cond $todo $retry }
+:until { -- $cond $todo $retry }
   $cond.set
   $todo.set
   
@@ -46,7 +46,7 @@
 ;
 
 # [: times todo
-:repeat { $times $todo $loop }
+:repeat { -- $times $todo $loop }
   $todo.set   # [: times 
   $times.set  # [:
   $loop.here  # [: 
@@ -69,6 +69,7 @@
 #[:
 :for-range
   {
+    --
     $todo
     $index
   }
@@ -86,7 +87,7 @@
 
 # [: cond onIf onElse
 # [: 
-:if { $cond $onIf $onElse }
+:if { -- $cond $onIf $onElse }
   
   # clear the stack of cond and branches
   # 

@@ -23,7 +23,7 @@
 
 # u8-addr cursor
 :type/u8.repr
-  { $cursor $addr } $cursor.set
+  { -- $cursor $addr } $cursor.set
   [
     dup strings/length swap $cursor.get ~cursor/write
   ]
@@ -125,7 +125,7 @@
   # [: index structaddr
   # [: &fieldValue[ index ]
   # 
-  : @name//@fieldName.nth.addr { $index }
+  : @name//@fieldName.nth.addr { -- $index }
     @name//@fieldName.addr  #[: index fieldaddr
     swap                    #[: fieldaddr index
     @fieldType.size * +     #[: &fieldaddr[ index ]
@@ -142,7 +142,7 @@
   # [: new-value index structaddr 
   # [: 
   # 
-  : @name//@fieldName.nth.set { $value }
+  : @name//@fieldName.nth.set { -- $value }
     @name//@fieldName.nth.addr # [: new-value &fieldaddr[ index ]
     @fieldType.set
   ;
@@ -168,7 +168,7 @@
   # [: value structaddr
   # [: 
   # 
-  : @name//@fieldName.set { $value }
+  : @name//@fieldName.set { -- $value }
     @name//@fieldName.addr #[: value fieldaddr
     @fieldType.set
   ;
@@ -176,7 +176,7 @@
   # [: todo structaddr
   # [:
   #
-  : @name//@fieldName.update { $structaddr $todo }
+  : @name//@fieldName.update { -- $structaddr $todo }
     $structaddr.copy      #[: todo structaddr
     @name//@fieldName.get #[: todo value
     swap                  #[: value todo
@@ -193,7 +193,7 @@
   
   # [: structaddr
   # [: 
-  : @name//@fieldName.decr { $fieldAddr }
+  : @name//@fieldName.decr { -- $fieldAddr }
     [ 1 - ] swap @name//@fieldName.update
   ;
   

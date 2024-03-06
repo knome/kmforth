@@ -7,6 +7,7 @@
 # 
 :with-fibonaccis
   {
+    --
     $todo
     $a
     $b
@@ -17,10 +18,10 @@
   1 $a.set
   1 $b.set
   
-  [ { $escape }
+  [ { -- $escape }
     $escape.set
     [
-      { $c }
+      { -- $c }
       
       $a.get $todo.call
       
@@ -37,7 +38,7 @@
   stack/with-escape
 ;
 
-:main { $n $last }
+:main { -- $n $last }
   0 $n.set
   0 $last.set
   

@@ -2,17 +2,17 @@
 @ "standard" ;
 
 :main
-  [ { $with-file-cursor } $with-file-cursor.set
+  [ { -- $with-file-cursor } $with-file-cursor.set
     
     "bld/TEST-READ-DATA.14"
     file-cursor/open-existing-file
-    [ { $readable-cursor $file-err }
+    [ { -- $readable-cursor $file-err }
       
       "open-existing-file error" errno/panic-on-error
       $readable-cursor.set
       
       128
-      [ { $buffer $thus}
+      [ { -- $buffer $thus}
         $buffer.set
         
         0 $thus.set

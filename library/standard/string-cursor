@@ -12,11 +12,11 @@
 # [: todo
 # [: (cursors todo)
 :string-cursor/with-string-cursors
-  { $todo-with-string-cursors } $todo-with-string-cursors.set
+  { -- $todo-with-string-cursors } $todo-with-string-cursors.set
   
   # sets up an indirection structure for use with string cursors
   [
-    {$string-cursor-definition} $string-cursor-definition.set
+    { -- $string-cursor-definition} $string-cursor-definition.set
     
     &string-cursor/-read  $string-cursor-definition.get ~cursor/CursorDefinition//read.set
     &string-cursor/-write $string-cursor-definition.get ~cursor/CursorDefinition//write.set
@@ -29,11 +29,11 @@
     # 
     # [: string todo
     # 
-    [ {$todo-with-cursor} $todo-with-cursor.set
+    [ { -- $todo-with-cursor} $todo-with-cursor.set
       
       string-cursor/StringCursor.size
       [
-        { $cursor } $cursor.set
+        { -- $cursor } $cursor.set
         
         $string-cursor-definition.get $cursor.get string-cursor/StringCursor//definition.set
         $cursor.get string-cursor/StringCursor//string.set
@@ -53,6 +53,7 @@
 # amount buffer cursor -> amount-read err
 :string-cursor/-read
   {
+    --
     $cursor $buffer $amount 
   }
   
@@ -60,7 +61,7 @@
   $buffer.set
   $amount.set
   
-  [ { $escape $actual-read $final-position $initial-position }
+  [ { -- $escape $actual-read $final-position $initial-position }
     
     $escape.set
     
@@ -97,7 +98,7 @@
 
 # position cursor -> err
 :string-cursor/-seek
-  { $position $cursor }
+  { -- $position $cursor }
   
   $cursor.set
   $position.set
@@ -116,13 +117,13 @@
   [
     # otherwise, we need to scan forward so if we run into the end of the string, we can stop early
     
-    { $p $s }
+    { -- $p $s }
     
     $cursor.get string-cursor/StringCursor//position.get $p.set
     $cursor.get string-cursor/StringCursor//string.get $s.set
     
     [
-      {$escape} $escape.set
+      { -- $escape} $escape.set
       
       $position.get $p.get -
       [

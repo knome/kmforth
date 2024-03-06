@@ -106,6 +106,7 @@
 #
 :write-strings
   {
+    --
     $n $fd
   }
 
@@ -125,12 +126,13 @@
   syscall/iovec.size *         #[: ss... <iovec-array-size>
   
   [
-    { $escape }
+    { -- $escape }
     
     $escape.set
     
     [
       {
+        --
         $iovecs
         $total
       }
@@ -145,7 +147,7 @@
       #
       $n.get                     ##[: ss... n
       [
-        { $iovec }
+        { -- $iovec }
         #                        ###[: ss... <index>
         $n.get swap - decr       ###[: ss... <reversed-index>
         syscall/iovec.size *     ###[: ss... <nth-iovec-offset>

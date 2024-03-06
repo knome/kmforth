@@ -2,7 +2,7 @@
 # [: size
 # [: regionaddr err
 # 
-:memory/map-region { $size }
+:memory/map-region { -- $size }
   $size.set
   syscall/mmap/no-fd
   syscall/mmap/prot-read syscall/mmap/prot-write or
@@ -81,6 +81,7 @@
 # 
 : memory/memmove
   {
+    --
     $dst
     $src
     $len
@@ -106,7 +107,7 @@
 # 
 # [: count unsigned-char dst
 : memory/memset
-  {$dst $v} $dst.set $v.set
+  { -- $dst $v} $dst.set $v.set
   
   #[: passthrough count on stack
   
@@ -121,7 +122,7 @@
 # # [: 
 # # 
 # : memory/bitmap.setNth
-#     { $bitmap $which $whichByte $mask }
+#     { -- $bitmap $which $whichByte $mask }
 #     
 #     $bitmap.set                  #[: index
 #     
@@ -147,7 +148,7 @@
 # # [: &bitmap bitIndex
 # # 
 # : memory/bitmap.getNth
-#   { $which $whichByte $mask }
+#   { -- $which $whichByte $mask }
 #   
 #   $which.set         # [: &bitmap
 #   $which.get 8 /     # [: &bitmap whichByte

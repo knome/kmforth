@@ -1,15 +1,15 @@
 
 @ "standard" ;
 
-:main { $s }
+:main { -- $s }
   "hello" $s.set
   
   [
-    { $with-string-cursor } $with-string-cursor.set
+    { -- $with-string-cursor } $with-string-cursor.set
     
     $s.get
     [
-      { $sc } $sc.set 
+      { -- $sc } $sc.set 
       
       "[tell]" print
       $sc.get ~cursor/tell

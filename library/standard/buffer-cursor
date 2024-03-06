@@ -14,10 +14,10 @@
 #[: (cursors todo)
 #
 :buffer-cursor/with-buffer-cursors
-  { -- $todo-with-buffer-cursors } $todo-with-buffer-cursors.set
+  { $todo-with-buffer-cursors }
   
   [
-    { -- $buffer-cursor-definition} $buffer-cursor-definition.set
+    { $buffer-cursor-definition }
     
     &buffer-cursor/-read  $buffer-cursor-definition.get ~cursor/CursorDefinition//read.set
     &buffer-cursor/-write $buffer-cursor-definition.get ~cursor/CursorDefinition//write.set
@@ -32,18 +32,15 @@
     # 
     # size todo
     [
-      { -- $todo-with-cursor $size }
-      
-      $todo-with-cursor.set
-      $size.set
+      { $size $todo-with-cursor }
       
       buffer-cursor/BufferCursor.size
       [
-        { -- $cursor } $cursor.set
+        { $cursor }
         
         $size.get
         [
-          { -- $buffer } $buffer.set
+          { $buffer }
           
           $size.get 0 $buffer.get memory/memset
           
@@ -69,14 +66,10 @@
 # amount buffer cursor -> amount-written err
 :buffer-cursor/-write
   {
-    --
     $amount $buffer $cursor
+    --
     $space-remaining
   }
-  
-  $cursor.set
-  $buffer.set
-  $amount.set
   
   $cursor.get buffer-cursor/BufferCursor//size.get
   $cursor.get buffer-cursor/BufferCursor//position.get

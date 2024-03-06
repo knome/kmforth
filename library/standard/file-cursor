@@ -21,9 +21,9 @@
 #[: (cursors todo)
 #
 :file-cursor/with-file-cursors
-  { -- $todo-with-file-cursors } $todo-with-file-cursors.set
+  { $todo-with-file-cursors }
   
-  [ { -- $definition} $definition.set
+  [ { $definition }
     
     &file-cursor/-read  $definition.get ~cursor/CursorDefinition//read.set
     &file-cursor/-write $definition.get ~cursor/CursorDefinition//write.set
@@ -41,17 +41,13 @@
     #
     [      
       {
-        --
         $path-or-fd $open-method $todo-with-file-cursor
+        --
         $fd $fd-err
       }
       
       -1 $fd.set
       0  $fd-err.set
-      
-      $todo-with-file-cursor.set
-      $open-method.set
-      $path-or-fd.set
       
       $open-method.get file-cursor/use-existing-fd ==
       [
@@ -105,7 +101,7 @@
       ]
       [
         file-cursor/FileCursor.size
-        [ { -- $cursor } $cursor.set
+        [ { $cursor }
           $definition.get $cursor.get file-cursor/FileCursor//definition.set
           $fd.get $cursor.get file-cursor/FileCursor//fd.set
           $cursor.get 0 $todo-with-file-cursor.call

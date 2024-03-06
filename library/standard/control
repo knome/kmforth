@@ -1,21 +1,17 @@
 
-:loop { -- $todo $loop }
-  $todo.set
+:loop { $todo -- $loop }
   $loop.here
   $todo.get
   call
   $loop.jump
 ;
 
-# [: cond todo
+# [: condfn todo
 # 
-:while { -- $test $todo $retry $condRet }
-  $todo.set    # pop stack into todo local
-  $test.set    # pop stack into test local
-  
+:while { $condfn $todo -- $retry $condRet }
   $retry.here  # push address following command into local
   
-  $test.get    # push and call the cond func
+  $condfn.get  # push and call the cond func
   call
   
   dup          # dups its return value
@@ -33,22 +29,17 @@
 ;
 
 # (like C until, executes body before checking cond, rather than cond first)
-# [: todo cond
+# [: todo condfn
 # 
-:until { -- $cond $todo $retry }
-  $cond.set
-  $todo.set
-  
+:until { $todo $condfn -- $retry }
   $retry.here
   $todo.call
-  $cond.call
+  $condfn.call
   $retry.jumpIf
 ;
 
 # [: times todo
-:repeat { -- $times $todo $loop }
-  $todo.set   # [: times 
-  $times.set  # [:
+:repeat { $times $todo -- $loop }
   $loop.here  # [: 
   
   $times.get  # [: times
@@ -68,13 +59,8 @@
 #[: (calls todo with each index from 0 until >= times)
 #[:
 :for-range
-  {
-    --
-    $todo
-    $index
-  }
+  { $todo -- $index }
   
-  $todo.set
   0 $index.set
   
   [
@@ -87,13 +73,7 @@
 
 # [: cond onIf onElse
 # [: 
-:if { -- $cond $onIf $onElse }
-  
-  # clear the stack of cond and branches
-  # 
-  $onElse.set # [: cond onIf
-  $onIf.set   # [: cond
-  $cond.set   # [: 
+:if { $cond $onIf $onElse }
   
   # call onIf if the condition was truthy
   # 

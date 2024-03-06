@@ -12,11 +12,11 @@
 # [: todo
 # [: (cursors todo)
 :string-cursor/with-string-cursors
-  { -- $todo-with-string-cursors } $todo-with-string-cursors.set
+  { $todo-with-string-cursors }
   
   # sets up an indirection structure for use with string cursors
   [
-    { -- $string-cursor-definition} $string-cursor-definition.set
+    { $string-cursor-definition }
     
     &string-cursor/-read  $string-cursor-definition.get ~cursor/CursorDefinition//read.set
     &string-cursor/-write $string-cursor-definition.get ~cursor/CursorDefinition//write.set
@@ -29,11 +29,11 @@
     # 
     # [: string todo
     # 
-    [ { -- $todo-with-cursor} $todo-with-cursor.set
+    [ { $todo-with-cursor }
       
       string-cursor/StringCursor.size
       [
-        { -- $cursor } $cursor.set
+        { $cursor }
         
         $string-cursor-definition.get $cursor.get string-cursor/StringCursor//definition.set
         $cursor.get string-cursor/StringCursor//string.set
@@ -52,16 +52,9 @@
 
 # amount buffer cursor -> amount-read err
 :string-cursor/-read
-  {
-    --
-    $cursor $buffer $amount 
-  }
+  { $amount $buffer $cursor }
   
-  $cursor.set
-  $buffer.set
-  $amount.set
-  
-  [ { -- $escape $actual-read $final-position $initial-position }
+  [ { $escape -- $actual-read $final-position $initial-position }
     
     $escape.set
     
@@ -98,10 +91,7 @@
 
 # position cursor -> err
 :string-cursor/-seek
-  { -- $position $cursor }
-  
-  $cursor.set
-  $position.set
+  { $position $cursor }
   
   $cursor.get string-cursor/StringCursor//position.get
   $position.get
@@ -123,7 +113,7 @@
     $cursor.get string-cursor/StringCursor//string.get $s.set
     
     [
-      { -- $escape} $escape.set
+      { $escape }
       
       $position.get $p.get -
       [

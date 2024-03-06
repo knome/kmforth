@@ -3,8 +3,7 @@
 # stack manipulation functions
 # 
 
-:dup { -- $a }
-  $a.set
+:dup { $a }
   $a.get
   $a.get
 ;
@@ -130,15 +129,13 @@
 # 
 :stack/with-escape 
   {
-    --
     $todo
+    --
     $escapefn
     $callstack
     $return
     $call
   }
-  
-  $todo.set
   
   stack/callstack.get $callstack.set
   
@@ -203,9 +200,9 @@
 
 #[: size todo
 :stack/with-zeroed-stack-buffer
-  { -- $todo $size } $todo.set $size.set
+  { $size $todo }
   $size.get
-  [ { -- $buffer } $buffer.set
+  [ { $buffer }
     $size.get 0 $buffer.get memory/memset
     
     $buffer.get $todo.call
@@ -216,11 +213,10 @@
 :decr `dec qword [r14-8]` ;
 :incr `inc qword [r14-8]` ;
 
-:swap { -- $a $b }
-  $a.set
-  $b.set
-  $a.get
+:swap
+  { $a $b }
   $b.get
+  $a.get
 ;
 
 :pop ` sub r14, 8 ` ;

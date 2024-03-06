@@ -2,8 +2,7 @@
 # [: size
 # [: regionaddr err
 # 
-:memory/map-region { -- $size }
-  $size.set
+:memory/map-region { $size }
   syscall/mmap/no-fd
   syscall/mmap/prot-read syscall/mmap/prot-write or
   syscall/mmap/map-private syscall/mmap/map-anonymous or
@@ -80,17 +79,7 @@
 # [: 
 # 
 : memory/memmove
-  {
-    --
-    $dst
-    $src
-    $len
-    $thus
-  }
-  
-  $len.set
-  $src.set
-  $dst.set
+  { $dst $src $len -- $thus }
   
   0 $thus.set
   
@@ -107,7 +96,7 @@
 # 
 # [: count unsigned-char dst
 : memory/memset
-  { -- $dst $v} $dst.set $v.set
+  { $v $dst }
   
   #[: passthrough count on stack
   

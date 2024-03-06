@@ -105,19 +105,14 @@
 #[: err
 #
 :write-strings
-  {
-    --
-    $n $fd
-  }
-
-  $fd.set
-
+  { $n $fd }
+  
   # if there are no strings, don't bother
   # 
   dup 0 ==                     #[: n=0 1 | ss=strings... n=1+ 0
   $.leaveIf                    #[: <> 0 | ss... n
   
-  $n.copy                      #[: ss... n
+  $n.get                       #[: ss... n
   
   # determine the size of the
   # stack-buffer we need for
@@ -126,19 +121,15 @@
   syscall/iovec.size *         #[: ss... <iovec-array-size>
   
   [
-    { -- $escape }
-    
-    $escape.set
+    { $escape }
     
     [
       {
-        --
         $iovecs
+        --
         $total
       }
       
-      #                          ##[: ss... <buffer>
-      $iovecs.set                ##[: ss...
       0 $total.set               ##[: ss...
       
       # write the strings on the stack
@@ -220,7 +211,7 @@
         when
       ]
       loop
-    ]                            #[: ss... <iovec-array-size> <todo-with-stack-iovec>
+    ]                       #[: ss... <iovec-array-size> <todo-with-stack-iovec>
     stack/with-stack-buffer #[: err <>
   ] stack/with-escape
   

@@ -19,10 +19,8 @@
 # [: err todo -> (errno-string todo)
 # 
 % errno/-define-strerror (@errors)
-  : errno/with-errno-string { -- $err $todo $desc }
+  : errno/with-errno-string { $err $todo -- $desc }
     
-    $todo.set
-    $err.set
     0 $desc.set
     
     $err.get 1024 is-bigger-than
@@ -61,9 +59,7 @@
           
           $prefixlen.get $serrlen.get + 1 +
           [
-            { -- $buffer }
-            
-            $buffer.set
+            { $buffer }
             
             $buffer.get $prefix.get $prefixlen.get memory/memmove
             $buffer.get $prefixlen.get + $serr.get $serrlen.get memory/memmove
@@ -83,14 +79,14 @@
   ;
 ;
 
-#[: message err -> (dead)
+#[: err message -> (dead)
 :errno/panic-on-error
-  { -- $message $err } $message.set $err.set
+  { $err $message }
   
   $err.get 0 !=
   [
     $err.get
-    [ { -- $strerrno } $strerrno.set
+    [ { $strerrno }
       "[errno/panic-on-error] message='" $message.get "' : error='" $strerrno.get "'" 5 panic-strings
     ] errno/with-errno-string
   ]

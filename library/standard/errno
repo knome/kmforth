@@ -91,7 +91,7 @@
   [
     $err.get
     [ { $strerrno } $strerrno.set
-      "[errno/panic-on-error] message='" $message.get "' : error='" $strerrno.get "'\n" 5 panic-strings
+      "[errno/panic-on-error] message='" $message.get "' : error='" $strerrno.get "'" 5 panic-strings
     ] errno/with-errno-string
   ]
   when

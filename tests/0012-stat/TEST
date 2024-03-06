@@ -1,0 +1,39 @@
+
+@ "standard" ;
+
+:main
+  "tests/0012-stat/DATA"
+  syscall/open/opt/readonly
+  syscall/open/mode/standard-file
+  syscall/open
+  
+  "open tests/0012-stat/DATA failed" errno/panic-on-error
+  
+  #[: fd
+  [
+    {$stat $err}
+    
+    $err.set
+    $stat.set
+    
+    $err.get
+    [
+      "error calling stat on fd:" print
+      $err.get printerr
+    ]
+    [
+      "size:" print
+      $stat.get syscall/FStat//size.get printno
+      
+      "blksize:" print
+      $stat.get syscall/FStat//blksize.get printno
+      
+      "...etc..." print
+      
+      "blocks (512 byte, not blksize):" print
+      $stat.get syscall/FStat//blocks.get printno
+    ]
+    if
+  ]
+  syscall/with-fstat
+;

@@ -1,14 +1,13 @@
 
-% cursor/StringCursor (@rc @st)
+% string-cursor/StringCursor (@rc @st)
   @ @rc @st (
-    (definition type/u64)
-    (string     type/u64)
+    (definition type/pointer)
+    (string     type/pointer)
     (position   type/u64)
-    (closed     type/u64) # change to "flags" later if we need more
   );
 ;
 
-@ struct/define cursor/StringCursor ;
+@ struct/define string-cursor/StringCursor ;
 
 # [: todo
 # [: (cursors todo)
@@ -19,12 +18,12 @@
   [
     {$string-cursor-definition} $string-cursor-definition.set
     
-    &string-cursor/StringCursor/read  $string-cursor-definition.get ~cursor/CursorDefinition//read.set
-    &string-cursor/StringCursor/write $string-cursor-definition.get ~cursor/CursorDefinition//write.set
-    &string-cursor/StringCursor/tell  $string-cursor-definition.get ~cursor/CursorDefinition//tell.set
-    &string-cursor/StringCursor/seek  $string-cursor-definition.get ~cursor/CursorDefinition//seek.set
-    &string-cursor/StringCursor/start $string-cursor-definition.get ~cursor/CursorDefinition//start.set
-    &string-cursor/StringCursor/close $string-cursor-definition.get ~cursor/CursorDefinition//close.set
+    &string-cursor/-read  $string-cursor-definition.get ~cursor/CursorDefinition//read.set
+    &string-cursor/-write $string-cursor-definition.get ~cursor/CursorDefinition//write.set
+    &string-cursor/-tell  $string-cursor-definition.get ~cursor/CursorDefinition//tell.set
+    &string-cursor/-seek  $string-cursor-definition.get ~cursor/CursorDefinition//seek.set
+    &string-cursor/-start $string-cursor-definition.get ~cursor/CursorDefinition//start.set
+    &string-cursor/-close $string-cursor-definition.get ~cursor/CursorDefinition//close.set
     
     # define new string cursor function
     # 
@@ -32,14 +31,13 @@
     # 
     [ {$todo-with-cursor} $todo-with-cursor.set
       
-      cursor/StringCursor.size
+      string-cursor/StringCursor.size
       [
         { $cursor } $cursor.set
         
-        $string-cursor-definition.get $cursor.get cursor/StringCursor//definition.set
-        $cursor.get cursor/StringCursor//string.set
-        0 $cursor.get cursor/StringCursor//position.set
-        0 $cursor.get cursor/StringCursor//closed.set
+        $string-cursor-definition.get $cursor.get string-cursor/StringCursor//definition.set
+        $cursor.get string-cursor/StringCursor//string.set
+        0 $cursor.get string-cursor/StringCursor//position.set
         
         $cursor.get $todo-with-cursor.call
       ]
@@ -52,108 +50,108 @@
   ~cursor/with-definition
 ;
 
-:string-cursor/StringCursor/read
-  { $amount $buffer $cursor }
+# amount buffer cursor -> amount-read err
+:string-cursor/-read
+  {
+    $cursor $buffer $amount 
+  }
+  
   $cursor.set
   $buffer.set
   $amount.set
   
-  "READ FROM STRING" log
-  
-  0
+  [ { $escape $actual-read $final-position $initial-position }
+    
+    $escape.set
+    
+    $cursor.get string-cursor/StringCursor//position.get $initial-position.set
+    
+    $amount.get $initial-position.get + $cursor.get string-cursor/-seek
+    
+    dup
+    [
+      0 swap $escape.call
+    ]
+    when
+    pop
+    
+    $cursor.get string-cursor/StringCursor//position.get $final-position.set
+    
+    $final-position.get $initial-position.get - $actual-read.set
+    
+    $buffer.get
+    $cursor.get string-cursor/StringCursor//string.get $initial-position.get +
+    $actual-read.get
+    memory/memmove
+    
+    $actual-read.get 0
+  ]
+  stack/with-escape
 ;
 
-:string-cursor/StringCursor/write
-  { $amount $buffer $cursor }
-  $cursor.set
-  $buffer.set
-  $amount.set
-  
-  "WRITE TO STRING" log
-  
-  0
-;
+# amount buffer cursor
+:string-cursor/-write pop pop pop "string-cursor is not writable" ;
 
 # cursor -> position err
-:string-cursor/StringCursor/tell
-  dup cursor/StringCursor//closed.get
-  [
-    pop 0 "cursor closed"
-  ]
-  [
-    cursor/StringCursor//position.get 0
-  ]
-  if
-;
+:string-cursor/-tell string-cursor/StringCursor//position.get 0 ;
 
 # position cursor -> err
-:string-cursor/StringCursor/seek
+:string-cursor/-seek
   { $position $cursor }
   
   $cursor.set
   $position.set
   
-  $cursor.get cursor/StringCursor//closed.get
+  $cursor.get string-cursor/StringCursor//position.get
+  $position.get
+  is-bigger-than-or-equal-to
   [
-    "cursor closed"
+    # if the current position is >= the requested one, we can just without scanning
+    
+    $position.get $cursor.get string-cursor/StringCursor//position.set
+    
+    # string-cursor seek never errs
+    0
   ]
   [
-    $cursor.get cursor/StringCursor//position.get $position.get is-bigger-than-or-equal-to
+    # otherwise, we need to scan forward so if we run into the end of the string, we can stop early
+    
+    { $p $s }
+    
+    $cursor.get string-cursor/StringCursor//position.get $p.set
+    $cursor.get string-cursor/StringCursor//string.get $s.set
+    
     [
-      # if the current position is >= the requested one, we can just without scanning
+      {$escape} $escape.set
       
-      $position.get $cursor.get cursor/StringCursor//position.set
-      0
-    ]
-    [
-      # otherwise, we need to scan forward so if we run into the end of the string, we can stop early
-      
-      { $p $s }
-      
-      $cursor.get cursor/StringCursor//position.get $p.set
-      $cursor.get cursor/StringCursor//string.get $s.set
-      
+      $position.get $p.get -
       [
-        {$escape} $escape.set
-        
-        $position.get $p.get -
+        $s.get memory/peek-b
         [
-          $s.get memory/peek-b
-          [
-            $s.incr
-            $p.incr
-          ]
-          [
-            # we've reached the end of the string, stop advancing
-            # it is not an error to reach the end and stop
-            # the caller must seek and then tell to be sure the seek worked
-            # we can introduce a checking helper on the cursor class to assist with this
-            
-            $escape.call
-          ]
-          if
+          $s.incr
+          $p.incr
         ]
-        repeat
+        [
+          # we've reached the end of the string, stop advancing
+          $escape.call
+        ]
+        if
       ]
-      stack/with-escape
-      
-      $p.get $cursor.get cursor/StringCursor//position.set
+      repeat
     ]
-    if
+    stack/with-escape
+    
+    $p.get $cursor.get string-cursor/StringCursor//position.set
+    
+    # string-cursor seek never errs
+    0
   ]
   if
 ;
 
-:string-cursor/StringCursor/start
-  "SEEK STRING START" log
-  0
-;
+:string-cursor/-start "string-cursor/-start unimplemented" ;
 
-:string-cursor/StringCursor/end
-  "SEEK STRING END" log
-  0
-;
+:string-cursor/-end "string-cursor/-end unimplemented" ;
 
-:string-cursor/StringCursor/close
-  "CLOSE STRING" log
-;
+# as strings don't really close, just ignore any requests to
+:string-cursor/-close pop ;

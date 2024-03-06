@@ -43,9 +43,7 @@
 # [: "string"
 # [: err
 # 
-:write
-  syscall/STDOUT -write-all
-;
+:write 1 syscall/STDOUT write-strings ;
 
 # print a string or die on failure
 # 
@@ -76,41 +74,6 @@
 # 
 :printerr
   &print errno/with-errno-string
-;
-
-# [: "string" fd
-# [: err
-# 
-:-write-all { $fd $len $string  $thus $retry }
-  $fd.set
-  dup strings/length       # [: string string-length
-  $len.set                 # [: string
-  $string.set              # [:
-  0 $thus.set              # [:
-  
-  $retry.here              # [:
-  
-  $string.get              # [: string
-  $len.get $thus.get -     # [: string remaining
-  $fd.get                  # [: string remaining fd
-  syscall/write            # [: amount err
-  
-  dup                      # [: amount err err
-  [                        # [: amount err err [on-err]
-    swap     # [: err amount
-    pop      # [: err
-    dup      # [: err err (so we return 'err' on $.leaveIf)
-  ]
-  $.callIf                 # [: amount err=0 | err err
-  $.leaveIf                # [: amount | err (leave)
-  
-  $thus.get +              # [: (amount+thus)
-  dup $thus.set            # [: (amount+thus)
-  
-  $len.get swap -          # [: (len-(amount+thus))
-  $retry.jumpIf            # [: (len-(amount+thus)) retry-addr
-  
-  0                        # [: 0
 ;
 
 # [: "string"

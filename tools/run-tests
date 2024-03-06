@@ -22,6 +22,12 @@ standard(){
         EXPECTEDERR="$( cat "$TESTPATH/STDERR" )" ;
     fi
     
+    if [ -e "$TESTPATH/PREPARE" ] ; then
+        if ! bash "$TESTPATH/PREPARE" ; then
+            die "$TESTPATH/PREPARE" failed to prepare for test to run
+        fi
+    fi
+    
     ./a.out >bld/STDOUT 2>bld/STDERR
     CODE="$?"
     OUT="$( cat bld/STDOUT )"

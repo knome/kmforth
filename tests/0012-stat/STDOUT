@@ -1,0 +1,7 @@
+size:
+21
+blksize:
+4096
+...etc...
+blocks (512 byte, not blksize):
+8

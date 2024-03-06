@@ -5,8 +5,11 @@
 :syscall/STDOUT 1 ;
 :syscall/STDERR 2 ;
 
+:syscall/SYSCALL-READ    0 ;
+:syscall/SYSCALL-WRITE   1 ;
 :syscall/SYSCALL-OPEN    2 ;
 :syscall/SYSCALL-CLOSE   3 ;
+:syscall/SYSCALL-FSTAT   5 ;
 :syscall/SYSCALL-MMAP    9 ;
 :syscall/SYSCALL-WRITEV 20 ;
 :syscall/SYSCALL-SOCKET 41 ;
@@ -30,6 +33,24 @@
   [ 0 swap neg ]         # rv (<) ontrue
   [ 0 ]                  # rv (<) ontrue onfalse
   if                     # 0 err | rv=amount 0
+;
+
+# [: <rdi> <rsi> <syscall-no>
+# [: <rax> 0 | 0 <err>
+:syscall/two
+  `
+  sub r14,8
+  mov rax,[r14]
+  sub r14,8
+  mov rsi,[r14]
+  sub r14,8
+  mov rdi,[r14]
+  syscall
+  `
+  dup 0 is-lesser-than
+  [ 0 swap neg ]
+  [ 0 ]
+  if
 ;
 
 # [: <rdi> <rsi> <rdx> <syscall-no>
@@ -86,63 +107,101 @@
   if                     # 0 err | rv=amount 0
 ;
 
-# PROT_NONE            0x0
-# PROT_READ            0x1
-# PROT_WRITE           0x2
-# PROT_EXEC            0x4
-# PROT_GROWSDOWN 0x1000000
-
-# MAP_SHARED          0x01
-# MAP_PRIVATE         0x02
-# MAP_SHARED_VALIDATE 0x03 # don't use
-# MAP_TYPE            0x0f # don't use
-
-# MAP_FIXED     0x10 # ( replace mappings, map to specific location? )
-# MAP_ANONYMOUS 0x20 # no file required
-
 # code that is machine specific.
 # not that I'm making this portable.
 # just because.
 
-# [: string length fd
+# [: length string fd
 # [: written err
 # 
 :syscall/write
-  `
-  sub r14, 8     ; pop fd into rdi
-  mov rdi, [r14] ;
-  sub r14, 8     ; pop string length into rdx
-  mov rdx, [r14] ;
-  sub r14, 8     ; pop string pointer into rsi
-  mov rsi, [r14] ; 
-  mov rax, 1     ; write syscall
-  syscall
+  { $fd $length $string }
   
-  test rax,rax
-  jns .wrote     ; jump to good if not signed ( negative = error )
+  $fd.set
+  $string.set
+  $length.set
   
-  ; on error, we negate (turn positive) and return the error code
-  mov qword [r14],0
-  add r14,8
-  neg rax
-  mov qword [r14],rax
-  add r14,8
-  jmp .leave
+  $fd.get
+  $string.get
+  $length.get
+  syscall/SYSCALL-WRITE
+  syscall/three
+;
+
+# [: length buffer fd
+# [: read err
+# 
+:syscall/read
+  { $fd $length $buffer }
   
- .wrote:
-  mov [r14],rax
-  add r14,8
-  mov qword [r14],0
-  add r14,8
+  $fd.set
+  $buffer.set
+  $length.set
   
- .leave:
-  `
+  $fd.get
+  $buffer.get
+  $length.get
+  syscall/SYSCALL-READ
+  syscall/three
 ;
 
 :syscall/exit
   syscall/SYSCALL-EXIT
   syscall/one
   [] loop
+;
+
+% syscall/FStat (@rc @st)
+  @ @rc @st (
+    (device     type/u64)
+    (inode      type/u64)
+    (link-count type/u64)
+    (mode       type/u32)
+    (user-id    type/u32)
+    (group-id   type/u32)
+    (-1         type/u32)
+    (rdev       type/u64)
+    (size       type/u64)
+    (blksize    type/u64)
+    (blocks     type/u64)
+    (atime      type/u64)
+    (-2         type/u64)
+    (mtime      type/u64)
+    (-3         type/u64)
+    (ctime      type/u64)
+    (-4         type/u8 32)
+  );
+;
+
+@ struct/define syscall/FStat ;
+
+#[: buffer fd
+#[: err
+# 
+:syscall/fstat
+  swap
+  syscall/SYSCALL-FSTAT
+  syscall/two
+;
+
+#[: fd todo
+#[: (buffer err todo.call)
+#
+:syscall/with-fstat
+  { $todo $fd } $todo.set $fd.set
+  syscall/FStat.size
+  [ { $buffer } $buffer.set
+    $buffer.get $fd.get syscall/fstat
+    dup
+    [
+      0 swap $todo.call
+    ]
+    [
+      $buffer.get swap $todo.call
+    ]
+    if
+  ]
+  stack/with-stack-buffer
 ;
 
 # for desired-address
@@ -160,6 +219,9 @@
 
 :syscall/mmap/map-shared     0x1 ;
 :syscall/mmap/map-private    0x2 ;
+# MAP_SHARED_VALIDATE       0x03 # don't use
+# MAP_TYPE                  0x0f # don't use
+# MAP_FIXED                 0x10 # ( replace mappings, map to specific location? )
 :syscall/mmap/map-anonymous 0x20 ;
 
 # [: openfd protection-bits flags desired-address file-offset mapping-size

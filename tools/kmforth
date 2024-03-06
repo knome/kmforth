@@ -555,6 +555,9 @@ def extract_string( initial, characters ):
             elif cc == 't':
                 bits.append( '\t' )
                 continue
+            elif cc == '0':
+                bits.append( '\0' )
+                continue
             else:
                 raise Exception( 'unknown escape: %s' % repr( '\\' + cc ) )
         else:
@@ -4421,9 +4424,10 @@ class LocalVarFns:
             if cfn != None:
                 continue
             else:
-                raise Exception( 'cannot locate localvar named (%s) in function (%s)' % (
+                raise Exception( 'cannot locate localvar named (%s) in function (%s @ %s)' % (
                     repr(self._localVarName),
                     repr(self._fn),
+                    repr(self._functions[self._fn].location()),
                 ))
         return slotno, indirections
     
@@ -4652,7 +4656,7 @@ class LocalVarFns:
             code.append( '    dec qword %s\n' % addr )
         else:
             self._require_slot_sized( self._frameOffsets.localvar_size, self._localVarName )
-            code.append( '    ; incr local (%s) in-place\n' % repr( self._localVarName ) )
+            code.append( '    ; decr local (%s) in-place\n' % repr( self._localVarName ) )
             code.append( '    dec qword [r15-8*%d]\n' % (self._slotno) )
     
 def asm_stringize( ss ):

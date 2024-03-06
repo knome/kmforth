@@ -1,0 +1,57 @@
+
+@ "standard" ;
+
+:main
+  [ { $with-buffer-cursor $with-string-cursor }
+    $with-buffer-cursor.set
+    $with-string-cursor.set
+    
+    "hello, world"
+    [ { $sc } $sc.set
+    
+      1024
+      [ { $bc } $bc.set
+      
+        $bc.get ~cursor/tell "pre-write bc tell failure" errno/panic-on-error
+        "position:" print
+        printno
+        
+        5 $bc.get $sc.get ~cursor/read-into-cursor "cursor read/write failure" errno/panic-on-error
+        "transferred for 5 write:" print
+        printno
+        
+        $bc.get ~cursor/tell "post-write bc tell failure" errno/panic-on-error
+        "position:" print
+        printno
+        
+        3 $bc.get $sc.get ~cursor/read-into-cursor "cursor read/write failure" errno/panic-on-error
+        "transferred for 3 write" print
+        printno
+        
+        $bc.get ~cursor/tell "post-write bc tell failure" errno/panic-on-error
+        "position:" print
+        printno
+        
+        1 "\0" $bc.get ~cursor/write "post-null bc failure" errno/panic-on-error
+        "written for nul-write:" print
+        printno
+        
+        $bc.get buffer-cursor/BufferCursor//buffer.get print
+      ]
+      $with-buffer-cursor.call
+    ]
+    $with-string-cursor.call
+  ]
+  with-various-cursors
+;
+
+:with-various-cursors
+  { $todo } $todo.set
+  [ { $with-string-cursor } $with-string-cursor.set
+    [ { $with-buffer-cursor } $with-buffer-cursor.set
+      $with-string-cursor.get $with-buffer-cursor.get $todo.call
+    ]
+    buffer-cursor/with-buffer-cursors
+  ]
+  string-cursor/with-string-cursors
+;

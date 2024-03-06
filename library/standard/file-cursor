@@ -1,0 +1,146 @@
+
+% file-cursor/FileCursor (@rc @st)
+  @ @rc @st (
+    (definition type/pointer)
+    (fd type/u32)
+  );
+;
+
+@ struct/define file-cursor/FileCursor ;
+
+:file-cursor/use-existing-fd                                1 ;
+:file-cursor/create-new-file                                2 ;
+:file-cursor/open-existing-file                             3 ;
+:file-cursor/create-new-or-open-existing-file               4 ;
+:file-cursor/create-new-file-for-appending                  5 ;
+:file-cursor/open-existing-file-for-reading                 6 ;
+:file-cursor/open-existing-file-for-appending               7 ;
+:file-cursor/create-new-or-open-existing-file-for-appending 8 ;
+
+#[: todo
+#[: (cursors todo)
+#
+:file-cursor/with-file-cursors
+  { $todo-with-file-cursors } $todo-with-file-cursors.set
+  
+  [ {$definition} $definition.set
+    
+    &file-cursor/-read  $definition.get ~cursor/CursorDefinition//read.set
+    &file-cursor/-write $definition.get ~cursor/CursorDefinition//write.set
+    &file-cursor/-tell  $definition.get ~cursor/CursorDefinition//tell.set
+    &file-cursor/-seek  $definition.get ~cursor/CursorDefinition//seek.set
+    &file-cursor/-start $definition.get ~cursor/CursorDefinition//start.set
+    &file-cursor/-end   $definition.get ~cursor/CursorDefinition//end.set
+    &file-cursor/-close $definition.get ~cursor/CursorDefinition//close.set
+    
+    #[: fd open-method==use-existing-fd todo
+    #[:   or
+    #[: path open-method==other todo
+    #[: 
+    #[: (todo $file-cursor err)
+    #
+    [      
+      {
+        $path-or-fd $open-method $todo-with-file-cursor
+        $fd $fd-err
+      }
+      
+      -1 $fd.set
+      0  $fd-err.set
+      
+      $todo-with-file-cursor.set
+      $open-method.set
+      $path-or-fd.set
+      
+      $open-method.get file-cursor/use-existing-fd ==
+      [
+        0 $fd-err.set
+        $path-or-fd.get $fd.set
+      ]
+      when
+      
+      $open-method.get file-cursor/create-new-file ==
+      [
+        $path-or-fd.get
+        syscall/open/opt/create syscall/open/opt/exclusive or syscall/open/opt/readwrite or
+        syscall/open/mode/standard-file
+        syscall/open
+        
+        $fd-err.set
+        $fd.set
+      ]
+      when
+      
+      $open-method.get file-cursor/open-existing-file ==
+      [
+        $path-or-fd.get
+        syscall/open/opt/readonly
+        syscall/open/mode/standard-file
+        syscall/open
+        
+        $fd-err.set
+        $fd.set
+      ]
+      when
+      
+      # if fd is still -1 and fd-err is still 0, we skipped
+      # all of the available open-method clauses since they
+      # should have either set the fd or the error
+      # 
+      $fd.get -1 ==
+      $fd-err.get 0 ==
+      and
+      [
+        $open-method.get
+        [
+          "[file-cursor] unknown open-method: " swap 2 panic-strings
+        ]
+        strings/with-unsigned-as-string
+      ]
+      
+      $fd-err.get
+      [
+        0 $fd-err.get $todo-with-file-cursor.call
+      ]
+      [
+        file-cursor/FileCursor.size
+        [ { $cursor } $cursor.set
+          $definition.get $cursor.get file-cursor/FileCursor//definition.set
+          $fd.get $cursor.get file-cursor/FileCursor//fd.set
+          $cursor.get 0 $todo-with-file-cursor.call
+        ]
+        stack/with-stack-buffer
+      ]
+      if
+    ]
+    $todo-with-file-cursors.call
+  ]
+  ~cursor/with-definition
+;
+
+# amount buffer cursor -> amount-read err
+:file-cursor/-read
+  file-cursor/FileCursor//fd.get
+  syscall/read
+;
+
+# amount buffer cursor -> amount-written err
+:file-cursor/-write
+  file-cursor/FileCursor//fd.get
+  syscall/write
+;
+
+# cursor -> position err
+:file-cursor/-tell "file-cursor/-tell unimplemented" panic ;
+
+# position cursor -> err
+:file-cursor/-seek "file-cursor/-seek unimplemented" panic ;
+
+# cursor -> err
+:file-cursor/-start "file-cursor/-start unimplemented" panic ;
+
+# cursor -> err
+:file-cursor/-end "file-cursor/-end unimplemented" panic ;
+
+# cursor -> <>
+:file-cursor/-close "file-cursor/-close unimplemented" panic ;

@@ -1,0 +1,116 @@
+
+% buffer-cursor/BufferCursor (@rc @st)
+  @ @rc @st (
+    (definition type/pointer)
+    (buffer     type/pointer)
+    (size       type/u64)
+    (position   type/u64)
+  );
+;
+
+@ struct/define buffer-cursor/BufferCursor ;
+
+#[: todo
+#[: (cursors todo)
+#
+:buffer-cursor/with-buffer-cursors
+  { $todo-with-buffer-cursors } $todo-with-buffer-cursors.set
+  
+  [
+    {$buffer-cursor-definition} $buffer-cursor-definition.set
+    
+    &buffer-cursor/-read  $buffer-cursor-definition.get ~cursor/CursorDefinition//read.set
+    &buffer-cursor/-write $buffer-cursor-definition.get ~cursor/CursorDefinition//write.set
+    &buffer-cursor/-tell  $buffer-cursor-definition.get ~cursor/CursorDefinition//tell.set
+    &buffer-cursor/-seek  $buffer-cursor-definition.get ~cursor/CursorDefinition//seek.set
+    &buffer-cursor/-start $buffer-cursor-definition.get ~cursor/CursorDefinition//start.set
+    &buffer-cursor/-end   $buffer-cursor-definition.get ~cursor/CursorDefinition//end.set
+    &buffer-cursor/-close $buffer-cursor-definition.get ~cursor/CursorDefinition//close.set
+    
+    # define the new buffer cursor function
+    # instead of merely wrapping a buffer, we actually create one!
+    # 
+    # size todo
+    [
+      { $todo-with-cursor $size }
+      
+      $todo-with-cursor.set
+      $size.set
+      
+      buffer-cursor/BufferCursor.size
+      [
+        { $cursor } $cursor.set
+        
+        $size.get
+        [
+          { $buffer } $buffer.set
+          
+          $size.get 0 $buffer.get memory/memset
+          
+          $buffer-cursor-definition.get $cursor.get buffer-cursor/BufferCursor//definition.set
+          $buffer.get $cursor.get buffer-cursor/BufferCursor//buffer.set
+          0 $cursor.get buffer-cursor/BufferCursor//position.set
+          $size.get $cursor.get buffer-cursor/BufferCursor//size.set
+          
+          $cursor.get $todo-with-cursor.call
+        ]
+        stack/with-stack-buffer
+      ]
+      stack/with-stack-buffer
+    ]
+    $todo-with-buffer-cursors.call
+  ]
+  ~cursor/with-definition
+;
+
+# amount buffer cursor -> amount-read err
+:buffer-cursor/-read "buffer-cursor/-read unimplemented" panic ;
+
+# amount buffer cursor -> amount-written err
+:buffer-cursor/-write
+  {
+    $amount $buffer $cursor
+    $space-remaining
+  }
+  
+  $cursor.set
+  $buffer.set
+  $amount.set
+  
+  $cursor.get buffer-cursor/BufferCursor//size.get
+  $cursor.get buffer-cursor/BufferCursor//position.get
+  -
+  $space-remaining.set
+  
+  $amount.get $space-remaining.get is-bigger-than
+  [
+    $space-remaining.get $amount.set
+  ]
+  when
+  
+  $cursor.get buffer-cursor/BufferCursor//buffer.get
+  $cursor.get buffer-cursor/BufferCursor//position.get
+  +
+  $buffer.get
+  $amount.get
+  memory/memmove
+  
+  $amount.get [+] $cursor.get buffer-cursor/BufferCursor//position.update
+  
+  $amount.get 0
+;
+
+# cursor -> position err
+:buffer-cursor/-tell buffer-cursor/BufferCursor//position.get 0 ;
+
+# position cursor -> err
+:buffer-cursor/-seek "buffer-cursor/-seek unimplemented" panic ;
+
+# cursor -> err
+:buffer-cursor/-start "buffer-cursor/-start unimplemented" panic ;
+
+# cursor -> err
+:buffer-cursor/-end "buffer-cursor/-end unimplemented" panic ;
+
+# cursor -> <>
+:buffer-cursor/-close "buffer-cursor/-close unimplemented" panic ;

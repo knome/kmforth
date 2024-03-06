@@ -1,0 +1,3 @@
+#!/bin/bash
+
+cp tests/0014-file-cursor/DATA bld/TEST-READ-DATA.14

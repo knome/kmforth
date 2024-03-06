@@ -25,28 +25,153 @@
 
 # todo
 # (blank-definition todo)
-:~cursor/with-definition
+:~cursor/with-definition 
+  { $todo } $todo.set
   ~cursor/CursorDefinition.size
   [
     { $cursor } $cursor.set
-    
     ~cursor/CursorDefinition.size 0 $cursor.get memory/memset
-    $cursor.get swap call
+    $cursor.get $todo.call
   ]
   stack/with-stack-buffer
 ;
 
 # base common functions
 
-# amount raw-buffer cursor -> (amount raw-buffer cursor definition-call) -> err
-: ~cursor/read.raw dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//read.call ;
+# amount raw-buffer cursor -> (amount raw-buffer cursor definition-call) -> amount-read err
+: ~cursor/read dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//read.call ;
 
-# amount raw-buffer cursor -> err
-: ~cursor/write.raw dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//write.call ;
+# amount raw-buffer cursor -> amount-written err
+: ~cursor/write dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//write.call ;
 
-: ~cursor/read.buffer "~cursor/read.buffer unimplemented" panic;
+: ~cursor/read-all "unimplemented" panic ;
 
-: ~cursor/write.buffer "~cursor/write.buffer unimplemented" panic ;
+# amount raw-buffer cursor -> amount-read err
+: ~cursor/write-all
+  { $cursor $raw-buffer $amount $remaining }
+  
+  $cursor.set
+  $raw-buffer.set
+  $amount.set
+  
+  $amount.get $remaining.set
+  
+  [ { $escape } $escape.set
+    [ $remaining.get 0 is-bigger-than ]
+    [
+      $remaining.get $raw-buffer.get $cursor.get dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//write.call
+      
+      # on error
+      # 
+      dup
+      [
+        $escape.call
+      ]
+      when
+      pop
+      
+      # on 0 write (no error + 0 write = space is full)
+      # 
+      dup 0 ==
+      [
+        pop
+        0 "cursor lacks sufficient space for full write"
+        $escape.call
+      ]
+      when
+      
+      dup
+      [-] $remaining.update
+      [+] $raw-buffer.update
+    ]
+    while
+    
+    $amount.get 0
+  ]
+  stack/with-escape
+;
+
+# amount receiving-cursor cursor -> amount-transferred err
+: ~cursor/read-into-cursor
+  { $cursor $receiving-cursor $amount }
+  
+  $cursor.set
+  $receiving-cursor.set
+  $amount.set
+  
+  $amount.get 0 ==
+  [
+    0 0
+  ]
+  [ { $written }
+    0 $written.set
+    
+    [ { $escape } $escape.set
+      $amount.get
+      [ { $buffer $p $remaining }
+        
+        $buffer.set
+        $buffer.get $p.set
+        
+        [ { $read-escape } $read-escape.set
+          [ $written.get $amount.get is-smaller-than ]
+          [
+            $amount.get $written.get - $p.get $cursor.get ~cursor/read  #[: amount-read err
+            dup
+            [
+              # there was an error, jump out and return it
+              $escape.call
+            ]
+            [
+              # we successfully wrote some amount, pop the error out of the way and record it
+              pop dup 0 ==
+              [
+                # if we read 0 without error, we assume the source has run out of data to read
+                pop $read-escape.call
+              ]
+              [
+                dup
+                [+] $written.update
+                [+] $p.update
+              ]
+              if
+            ]
+            if
+          ]
+          while
+        ]
+        stack/with-escape
+        
+        $buffer.get $p.set
+        
+        [ $amount.get 0 is-bigger-than ]
+        [
+          $amount.get $p.get $receiving-cursor.get ~cursor/write #[: amount-written err
+          dup
+          [
+            # there was an error, jump out and return it
+            $escape.call
+          ]
+          [
+            pop dup
+            [-] $amount.update
+            [+] $p.update
+          ]
+          if
+        ]
+        while
+      ]
+      stack/with-stack-buffer
+      
+      $written.get 0
+    ]
+    stack/with-escape
+  ]
+  if
+;
+
+# amount providing-cursor cursor
+: ~cursor/write-from-cursor swap ~cursor/read-into-cursor ;
 
 # cursor -> position err
 : ~cursor/tell  dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//tell.call  ;

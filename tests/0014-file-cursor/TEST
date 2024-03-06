@@ -1,0 +1,40 @@
+
+@ "standard" ;
+
+:main
+  [ { $with-file-cursor } $with-file-cursor.set
+    
+    "bld/TEST-READ-DATA.14"
+    file-cursor/open-existing-file
+    [ { $readable-cursor $file-err }
+      
+      "open-existing-file error" errno/panic-on-error
+      $readable-cursor.set
+      
+      128
+      [ { $buffer $thus}
+        $buffer.set
+        
+        0 $thus.set
+        
+        10 $buffer.get $readable-cursor.get ~cursor/read "10-read error" errno/panic-on-error
+        dup [+] $thus.update
+        "10-read:" print
+        printno
+        
+        15 $buffer.get $thus.get + $readable-cursor.get ~cursor/read "15-read error" errno/panic-on-error
+        dup [+] $thus.update
+        "15-read:" print
+        printno
+        
+        0 $buffer.get $thus.get + memory/poke-b
+        
+        "data read:" print
+        $buffer.get print
+      ]
+      stack/with-zeroed-stack-buffer
+    ]
+    $with-file-cursor.call
+  ]
+  file-cursor/with-file-cursors
+;

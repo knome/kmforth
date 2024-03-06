@@ -1,0 +1,1 @@
+[errno/panic-on-error] message='error writing when too little space' : error='cursor lacks sufficient space for full write'

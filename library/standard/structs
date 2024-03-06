@@ -21,6 +21,15 @@
 :type/u8.set  memory/poke-b ;
 :type/u8.get  memory/peek-b ;
 
+# u8-addr cursor
+:type/u8.repr
+  { $cursor $addr } $cursor.set
+  [
+    dup strings/length swap $cursor.get ~cursor/write
+  ]
+  strings/with-unsigned-as-string
+;
+
 :type/u16.size 2             ;
 :type/u16.set  memory/poke-w ;
 :type/u16.get  memory/peek-w ;

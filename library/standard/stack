@@ -200,6 +200,18 @@
   `
 ;
 
+#[: size todo
+:stack/with-zeroed-stack-buffer
+  { $todo $size } $todo.set $size.set
+  $size.get
+  [ { $buffer } $buffer.set
+    $size.get 0 $buffer.get memory/memset
+    
+    $buffer.get $todo.call
+  ]
+  stack/with-stack-buffer
+;
+
 :decr `dec qword [r14-8]` ;
 :incr `inc qword [r14-8]` ;
 

@@ -1,0 +1,27 @@
+
+@ "standard" ;
+
+:main
+  
+  [ { $with-buffer-cursor } $with-buffer-cursor.set
+    
+    32
+    [ { $c } $c.set
+      "hello-world" dup strings/length swap $c.get ~cursor/write-all "error writing when space is available" errno/panic-on-error
+      
+      "buffer[32] wrote:" print
+      printno
+      
+    ] $with-buffer-cursor.call
+    
+    8
+    [
+      { $c } $c.set
+      "hello-world" dup strings/length swap $c.get ~cursor/write-all "error writing when too little space" errno/panic-on-error
+      
+      "unreachable" print
+      
+    ] $with-buffer-cursor.call
+    
+  ] buffer-cursor/with-buffer-cursors
+;

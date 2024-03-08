@@ -1,0 +1,22 @@
+
+@ "standard" ;
+
+:main
+  
+  "hello"
+  "this"
+  "is"
+  "a"
+  "test"
+  "this"
+  "is"
+  "only"
+  "a"
+  "test"
+  10
+  [ { $s }
+    "the string:" print
+    $s.get print
+  ]
+  strings/with-strings-as-string
+;

@@ -1,0 +1,66 @@
+
+@ "standard" ;
+
+:main
+  [ { $with-file-cursor }
+    
+    "bld/TEST-READ-DATA.14"
+    file-cursor/open-existing-file
+    [ { $fc $err }
+      
+      $err.get "unexpected error opening file" errno/panic-on-error
+      
+      128
+      [ { $buffer -- $b }
+        
+        $buffer.get $b.set
+        
+        $fc.get ~cursor/tell "[aaa] tell" errno/panic-on-error
+        "[aaa] position:" print
+        printno
+        
+        3 $b.get $fc.get ~cursor/read "[bbb] read" errno/panic-on-error
+        dup [+] $b.update
+        "[bbb] amount-read:" print
+        printno
+        
+        $fc.get ~cursor/tell "[ccc] tell" errno/panic-on-error
+        "[ccc] position:" print
+        printno
+        
+        1 $fc.get ~cursor/seek "[ddd] seek" errno/panic-on-error
+        
+        $fc.get ~cursor/tell "[eee] tell" errno/panic-on-error
+        "[eee] position:" print
+        printno
+        
+        5 $b.get $fc.get ~cursor/read "[fff] read" errno/panic-on-error
+        dup [+] $b.update
+        "[fff] amount-read:" print
+        printno
+        
+        $fc.get ~cursor/tell "[ggg] tell" errno/panic-on-error
+        "[ggg] position:" print
+        printno
+        
+        0 $b.get memory/poke-b
+        $b.incr
+        
+        "buffer:" print
+        $buffer.get print
+        
+        $fc.get ~cursor/close
+        
+        $fc.get ~cursor/tell "[hhh] tell after close" errno/panic-on-error
+        pop
+        
+        "unreachable" panic
+      ]
+      stack/with-stack-buffer
+      
+    ]
+    $with-file-cursor.call
+    
+  ]
+  file-cursor/with-file-cursors
+;

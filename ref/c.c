@@ -25,5 +25,12 @@ int main( int argc, char ** argv )
   e(st_mtime);
   e(st_ctime);
   
+  printf("\n");
+  
+  printf("seek\n");
+  printf("  SEEK_SET : %llu\n", (unsigned long long) SEEK_SET );
+  printf("  SEEK_CUR : %llu\n", (unsigned long long) SEEK_CUR );
+  printf("  SEEK_END : %llu\n", (unsigned long long) SEEK_END );
+  
   return 0;
 }

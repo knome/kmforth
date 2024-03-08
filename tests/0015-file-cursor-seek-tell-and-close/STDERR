@@ -1,0 +1,1 @@
+[errno/panic-on-error] message='[hhh] tell after close' : error='file is closed'

@@ -11,10 +11,7 @@
   
   #[: fd
   [
-    { -- $stat $err}
-    
-    $err.set
-    $stat.set
+    { $stat $err}
     
     $err.get
     [

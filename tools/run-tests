@@ -39,7 +39,7 @@ standard(){
     fi
     
     if ! [ "$EXPECTEDOUT" == "$OUT" ]; then
-        log "ERROR:"
+        log "STDOUT ERROR:"
         log
         log "expected:"
         log "$EXPECTEDOUT"
@@ -51,7 +51,7 @@ standard(){
     fi
     
     if ! [ "$EXPECTEDERR" == "$ERR" ]; then
-        log "ERROR:"
+        log "STDERR ERROR:"
         log
         log "expected:"
         log "$EXPECTEDERR"

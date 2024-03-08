@@ -2,7 +2,9 @@
 % file-cursor/FileCursor (@rc @st)
   @ @rc @st (
     (definition type/pointer)
-    (fd type/u32)
+    (name   type/u64)
+    (fd     type/u32)
+    (closed type/u32)
   );
 ;
 
@@ -32,7 +34,7 @@
     &file-cursor/-start $definition.get ~cursor/CursorDefinition//start.set
     &file-cursor/-end   $definition.get ~cursor/CursorDefinition//end.set
     &file-cursor/-close $definition.get ~cursor/CursorDefinition//close.set
-    
+
     #[: fd open-method==use-existing-fd todo
     #[:   or
     #[: path open-method==other todo
@@ -43,72 +45,93 @@
       {
         $path-or-fd $open-method $todo-with-file-cursor
         --
-        $fd $fd-err
+        $name $fd $fd-err
+        $prepare-cursor-and-call-todo
       }
       
-      -1 $fd.set
-      0  $fd-err.set
-      
-      $open-method.get file-cursor/use-existing-fd ==
       [
-        0 $fd-err.set
-        $path-or-fd.get $fd.set
+        $fd-err.get
+        [
+          0 $fd-err.get $todo-with-file-cursor.call
+        ]
+        [
+          file-cursor/FileCursor.size
+          [ { $cursor }
+            $definition.get $cursor.get file-cursor/FileCursor//definition.set
+            $fd.get $cursor.get file-cursor/FileCursor//fd.set
+            0 $cursor.get file-cursor/FileCursor//closed.set
+            $cursor.get 0 $todo-with-file-cursor.call
+          ]
+          stack/with-stack-buffer
+        ]
+        if
       ]
-      when
+      $prepare-cursor-and-call-todo.set
       
-      $open-method.get file-cursor/create-new-file ==
       [
-        $path-or-fd.get
-        syscall/open/opt/create syscall/open/opt/exclusive or syscall/open/opt/readwrite or
-        syscall/open/mode/standard-file
-        syscall/open
+        {
+          $escape
+        }
         
-        $fd-err.set
-        $fd.set
-      ]
-      when
-      
-      $open-method.get file-cursor/open-existing-file ==
-      [
-        $path-or-fd.get
-        syscall/open/opt/readonly
-        syscall/open/mode/standard-file
-        syscall/open
+        -1 $fd.set
+        0  $fd-err.set
         
-        $fd-err.set
-        $fd.set
-      ]
-      when
-      
-      # if fd is still -1 and fd-err is still 0, we skipped
-      # all of the available open-method clauses since they
-      # should have either set the fd or the error
-      # 
-      $fd.get -1 ==
-      $fd-err.get 0 ==
-      and
-      [
+        $open-method.get file-cursor/use-existing-fd ==
+        [
+          $fd.get
+          [ { $sfd }
+            
+            $sfd.get $name.set
+            0 $fd-err.set
+            $path-or-fd.get $fd.set
+            
+            $prepare-cursor-and-call-todo.call
+            $escape.call
+          ]
+          strings/with-unsigned-as-string
+        ]
+        when
+        
+        $open-method.get file-cursor/create-new-file ==
+        [
+          $path-or-fd.get
+          syscall/open/opt/create syscall/open/opt/exclusive or syscall/open/opt/readwrite or
+          syscall/open/mode/standard-file
+          syscall/open
+          
+          $path-or-fd.get $name.set
+          $fd-err.set
+          $fd.set
+          
+          $prepare-cursor-and-call-todo.call
+          $escape.call
+        ]
+        when
+        
+        $open-method.get file-cursor/open-existing-file ==
+        [
+          $path-or-fd.get
+          syscall/open/opt/readonly
+          syscall/open/mode/standard-file
+          syscall/open
+          
+          $path-or-fd.get $name.set
+          $fd-err.set
+          $fd.set
+          
+          $prepare-cursor-and-call-todo.call
+          $escape.call
+        ]
+        when
+        
         $open-method.get
         [
           "[file-cursor] unknown open-method: " swap 2 panic-strings
         ]
         strings/with-unsigned-as-string
+        
       ]
-      
-      $fd-err.get
-      [
-        0 $fd-err.get $todo-with-file-cursor.call
-      ]
-      [
-        file-cursor/FileCursor.size
-        [ { $cursor }
-          $definition.get $cursor.get file-cursor/FileCursor//definition.set
-          $fd.get $cursor.get file-cursor/FileCursor//fd.set
-          $cursor.get 0 $todo-with-file-cursor.call
-        ]
-        stack/with-stack-buffer
-      ]
-      if
+      stack/with-escape
     ]
     $todo-with-file-cursors.call
   ]
@@ -117,27 +140,119 @@
 
 # amount buffer cursor -> amount-read err
 :file-cursor/-read
-  file-cursor/FileCursor//fd.get
-  syscall/read
+  dup file-cursor/FileCursor//closed.get
+  [
+    pop pop pop 0 "file is closed"
+  ]
+  [
+    file-cursor/FileCursor//fd.get
+    syscall/read
+  ]
+  if
 ;
 
 # amount buffer cursor -> amount-written err
 :file-cursor/-write
-  file-cursor/FileCursor//fd.get
-  syscall/write
+  dup file-cursor/FileCursor//closed.get
+  [
+    pop pop pop 0 "file is closed"
+  ]
+  [
+    file-cursor/FileCursor//fd.get
+    syscall/write
+  ]
+  if
 ;
 
 # cursor -> position err
-:file-cursor/-tell "file-cursor/-tell unimplemented" panic ;
+:file-cursor/-tell
+  dup file-cursor/FileCursor//closed.get
+  [
+    pop 0 "file is closed"
+  ]
+  [
+    file-cursor/FileCursor//fd.get
+    0 swap
+    syscall/lseek/relative-to-current
+    swap
+    syscall/lseek
+  ]
+  if
+;
 
 # position cursor -> err
-:file-cursor/-seek "file-cursor/-seek unimplemented" panic ;
+:file-cursor/-seek
+  dup file-cursor/FileCursor//closed.get
+  [
+    pop pop "file is closed"
+  ]
+  [
+    file-cursor/FileCursor//fd.get
+    syscall/lseek/relative-to-start
+    swap
+    syscall/lseek
+    swap pop
+  ]
+  if
+;
 
 # cursor -> err
-:file-cursor/-start "file-cursor/-start unimplemented" panic ;
+:file-cursor/-start
+  dup file-cursor/FileCursor//closed.get
+  [
+    pop "file is closed"
+  ]
+  [
+    0 swap file-cursor/-seek
+  ]
+  if
+;
 
 # cursor -> err
-:file-cursor/-end "file-cursor/-end unimplemented" panic ;
+:file-cursor/-end
+  dup file-cursor/FileCursor//closed.get
+  [
+    pop "file is closed"
+  ]
+  [
+    file-cursor/FileCursor//fd.get
+    0
+    swap
+    syscall/lseek/relative-to-end
+    swap
+    syscall/lseek
+    swap pop
+  ]
+  if
+;
 
 # cursor -> <>
-:file-cursor/-close "file-cursor/-close unimplemented" panic ;
+:file-cursor/-close
+  { $cursor }
+  $cursor.get file-cursor/FileCursor//closed.get
+  [
+    # multiple closes are idempotent
+  ]
+  [ 
+    1 $cursor.get file-cursor/FileCursor//closed.set
+    $cursor.get file-cursor/FileCursor//fd.get
+    syscall/close
+    dup
+    [
+      [ { $serr }
+        "[WARNING] unexpected error closing file '"
+        $cursor.get file-cursor/FileCursor//name.get
+        "': "
+        $serr.get
+        4
+        log-strings
+      ]
+      errno/with-errno-string
+    ]
+    [
+      pop
+    ]
+    if
+  ]
+  if
+;

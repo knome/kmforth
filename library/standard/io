@@ -81,6 +81,8 @@
 # 
 :log "\n" 2 syscall/STDERR write-strings [ 203 exit ] $.callIf ;
 
+:log-strings "\n" swap incr syscall/STDERR write-strings [ 200 exit ] $.callIf ;
+
 # does not return
 # 
 # [: "string"

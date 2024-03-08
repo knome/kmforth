@@ -71,6 +71,54 @@
   `
 ;
 
+# we might be able to drop a buffer onto the data-stack
+# and count the strings into that, then dropping the lot
+# of it on our way out, to avoid having to double count
+# these things while creating the call-stack buffer with
+# the full string in it
+# 
+# ss... num-strings todo
+# 
+:strings/with-strings-as-string
+  { $n $todo -- $total }
+  $n.get [ nth strings/length [+] $total.update ] for-range
+  $total.incr
+  $total.get
+  [ {$buffer -- $b}
+    $buffer.get $total.get + $b.set
+    $b.decr
+    $n.get
+    [
+      dup strings/length [swap -] $b.update
+      $b.get strings/strcpy pop
+    ]
+    repeat
+    0 $buffer.get $total.get + 1 - memory/poke-b
+    $buffer.get $todo.call
+  ]
+  stack/with-stack-buffer
+;
+
+# the onus of ensuring the destination has sufficient state is on the caller
+# src dst -> number-copied
+# 
+:strings/strcpy
+  { $src $dst -- $n }
+  0 $n.set
+  [
+    $src.get memory/peek-b dup
+    $src.incr
+  ]
+  [
+    $dst.get memory/poke-b
+    $dst.incr
+    $n.incr
+  ]
+  while
+  pop
+  $n.get
+;
+
 % strings/-define-ascii (@bit.each)
   @ strings/-define-ascii-bit @bit ;
 ;

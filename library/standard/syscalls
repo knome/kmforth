@@ -10,6 +10,7 @@
 :syscall/SYSCALL-OPEN    2 ;
 :syscall/SYSCALL-CLOSE   3 ;
 :syscall/SYSCALL-FSTAT   5 ;
+:syscall/SYSCALL-LSEEK   8 ;
 :syscall/SYSCALL-MMAP    9 ;
 :syscall/SYSCALL-WRITEV 20 ;
 :syscall/SYSCALL-SOCKET 41 ;
@@ -371,4 +372,19 @@
 :syscall/writev
   syscall/SYSCALL-WRITEV  # fd iovec len call
   syscall/three           # rv
+;
+
+:syscall/lseek/relative-to-start   0 ;
+:syscall/lseek/relative-to-current 1 ;
+:syscall/lseek/relative-to-end     2 ;
+
+#[: position relative-to fd -> position err
+:syscall/lseek
+  { $position $relative-to $fd }
+  
+  $fd.get
+  $position.get
+  $relative-to.get
+  syscall/SYSCALL-LSEEK
+  syscall/three
 ;

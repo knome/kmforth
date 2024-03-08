@@ -6,7 +6,13 @@
   [ { -- $with-buffer-cursor } $with-buffer-cursor.set
     
     32
-    [ { -- $c } $c.set
+    buffer-cursor/locate-buffer-on-stack
+    [ { -- $c } 
+      
+      "stack buffer allocation error?" errno/panic-on-error
+      
+      $c.set
+      
       "hello-world" dup strings/length swap $c.get ~cursor/write-all "error writing when space is available" errno/panic-on-error
       
       "buffer[32] wrote:" print
@@ -15,8 +21,14 @@
     ] $with-buffer-cursor.call
     
     8
+    buffer-cursor/locate-buffer-on-stack
     [
-      { -- $c } $c.set
+      { -- $c }
+      
+      "stack buffer allocation error?" errno/panic-on-error
+      
+      $c.set
+      
       "hello-world" dup strings/length swap $c.get ~cursor/write-all "error writing when too little space" errno/panic-on-error
       
       "unreachable" print

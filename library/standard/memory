@@ -12,6 +12,21 @@
   syscall/mmap
 ;
 
+:memory/unmap-region
+  syscall/munmap
+  dup
+  [
+    [
+      "[syscall/munmap] unexpected error: " swap 2 log-strings
+    ]
+    errno/with-errno-string
+  ]
+  [
+    pop
+  ]
+  if
+;
+
 # all values go in and out of rax register
 # or its variants
 # 

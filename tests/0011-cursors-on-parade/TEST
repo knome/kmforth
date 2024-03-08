@@ -7,11 +7,14 @@
     $with-string-cursor.set
     
     "hello, world"
-    [ { -- $sc } $sc.set
-    
-      1024
-      [ { -- $bc } $bc.set
+    [ { $sc }
       
+      1024
+      buffer-cursor/locate-buffer-on-stack
+      [ { $bc $err }
+        
+        $err.get "stack buffer allocation error?" errno/panic-on-error
+        
         $bc.get ~cursor/tell "pre-write bc tell failure" errno/panic-on-error
         "position:" print
         printno

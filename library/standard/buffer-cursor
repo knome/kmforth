@@ -10,6 +10,9 @@
 
 @ struct/define buffer-cursor/BufferCursor ;
 
+:buffer-cursor/locate-buffer-on-stack             1 ;
+:buffer-cursor/locate-buffer-in-new-mapped-region 2 ;
+
 #[: todo
 #[: (cursors todo)
 #
@@ -30,28 +33,68 @@
     # define the new buffer cursor function
     # instead of merely wrapping a buffer, we actually create one!
     # 
-    # size todo
+    # size kind todo
+    # (cursor err todo.call)
     [
-      { $size $todo-with-cursor }
+      { $size $buffer-kind $todo-with-cursor }
       
       buffer-cursor/BufferCursor.size
       [
-        { $cursor }
+        { $cursor -- $call-with-buffer }
         
-        $size.get
         [
           { $buffer }
-          
           $size.get 0 $buffer.get memory/memset
-          
           $buffer-cursor-definition.get $cursor.get buffer-cursor/BufferCursor//definition.set
           $buffer.get $cursor.get buffer-cursor/BufferCursor//buffer.set
           0 $cursor.get buffer-cursor/BufferCursor//position.set
           $size.get $cursor.get buffer-cursor/BufferCursor//size.set
           
-          $cursor.get $todo-with-cursor.call
+          $cursor.get 0 $todo-with-cursor.call
         ]
-        stack/with-stack-buffer
+        $call-with-buffer.set        
+        
+        [ { $escape }
+          
+          $buffer-kind.get buffer-cursor/locate-buffer-on-stack ==
+          [
+            $size.get $call-with-buffer.get stack/with-stack-buffer
+            $escape.call
+          ]
+          when
+          
+          $buffer-kind.get buffer-cursor/locate-buffer-in-new-mapped-region ==
+          [
+            $size.get memory/map-region
+            dup
+            [
+              # error
+              swap pop 0 swap $todo-with-cursor.call
+              $escape.call
+            ]
+            [
+              pop
+              
+              # region ready to go
+              $call-with-buffer.call
+              
+              $cursor.get buffer-cursor/BufferCursor//size.get
+              $cursor.get buffer-cursor/BufferCursor//buffer.get
+              memory/unmap-region
+              $escape.call
+            ]
+            if
+          ]
+          when
+          
+          $buffer-kind.get
+          [
+            "unknown buffer-kind: " swap 2 panic-strings
+          ]
+          strings/with-unsigned-as-string
+        
+        ]
+        stack/with-escape
       ]
       stack/with-stack-buffer
     ]

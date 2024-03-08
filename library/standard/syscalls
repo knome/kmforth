@@ -12,6 +12,7 @@
 :syscall/SYSCALL-FSTAT   5 ;
 :syscall/SYSCALL-LSEEK   8 ;
 :syscall/SYSCALL-MMAP    9 ;
+:syscall/SYSCALL-MUNMAP 11 ;
 :syscall/SYSCALL-WRITEV 20 ;
 :syscall/SYSCALL-SOCKET 41 ;
 :syscall/SYSCALL-BIND   49 ;
@@ -231,6 +232,14 @@
   $offset.get
   syscall/SYSCALL-MMAP
   syscall/six
+;
+
+#[: size addr
+#
+:syscall/munmap
+  swap
+  syscall/SYSCALL-MUNMAP
+  syscall/two
 ;
 
 :syscall/open/opt/accmode    0x00000003 ;

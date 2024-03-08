@@ -1,0 +1,19 @@
+
+@ "standard" ;
+
+:main
+  [ { $with-buffer-cursor }
+    
+    4096 1024 *
+    buffer-cursor/locate-buffer-in-new-mapped-region
+    [ { $bc $err }
+      $err.get "region allocation error" errno/panic-on-error
+      
+      5 "hello\0" $bc.get ~cursor/write "write error" errno/panic-on-error
+      
+      $bc.get buffer-cursor/BufferCursor//buffer.get print
+    ]
+    $with-buffer-cursor.call
+  ]
+  buffer-cursor/with-buffer-cursors
+;

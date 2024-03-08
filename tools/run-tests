@@ -33,9 +33,11 @@ standard(){
     OUT="$( cat bld/STDOUT )"
     ERR="$( cat bld/STDERR )"
     
+    FAILURE=false
+    
     if ! [ "$EXPECTEDCODE" -eq "$CODE" ]; then
         log "ERROR expected=$EXPECTEDCODE code=$CODE"
-        die "test failed"
+        FAILURE=true
     fi
     
     if ! [ "$EXPECTEDOUT" == "$OUT" ]; then
@@ -47,7 +49,7 @@ standard(){
         log "received:"
         log "$OUT"
         log
-        die "test failed"
+        FAILURE=true
     fi
     
     if ! [ "$EXPECTEDERR" == "$ERR" ]; then
@@ -59,8 +61,12 @@ standard(){
         log "received:"
         log "$ERR"
         log
-        die "test failed"
+        FAILURE=true
     fi
+    
+    case $FAILURE in
+        true) die "test failed"
+    esac
 }
 
 for TESTPATH in tests/* ;

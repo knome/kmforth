@@ -3396,6 +3396,9 @@ class NotStupidCoroutine:
         else:
             self._pending = (value,)
 
+# fixing optimization is going to be a slog of ensuring that functions that are inlined
+# have their parentage appropriately rewritten so that their trampolines continue working
+
 def optimize( allfns, used, callgraph, startname ):
     notes = {}
     opted = {}
@@ -3469,7 +3472,8 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
         elif command.kind() == 'string':
             pass
         elif command.kind() == 'fnref':
-            pass
+            if (yield command.value()):
+                recursive.add( command.value() )
         else:
             raise Exception( 'unknown kind: %s' % repr( command.kind() ) )
     
@@ -3956,10 +3960,11 @@ def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetf
         
         if fn == 'get':
             if name in replacements:
-                log('[propagate-localfn-constants] replacing %s with constant %s' % (
-                    repr( command ) ,
-                    repr( replacements[ name ] ) ,
-                ))
+                if G_SHOW_OPTIMIZATIONS:
+                    log('[propagate-localfn-constants] replacing %s with constant %s' % (
+                        repr( command ) ,
+                        repr( replacements[ name ] ) ,
+                    ))
                 changed = True
                 rewritten.append( replacements[ name ] )
                 continue
@@ -3972,7 +3977,12 @@ def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetf
             # we can check what subset of locals are used until the associated name is .addr, .get or .jump'd
             # if we hit another <name>.here it's a new loop and we'd have to check that separately
             # for now, though, we'll just conservatively assume 'loop starts == dead locals'
-            log('[propagate-localfn-constants] dropping all replacements on encountering potential loop start: %s' % repr( command ) )
+            if G_SHOW_OPTIMIZATIONS:
+                log(
+                    '[propagate-localfn-constants] dropping all replacements on encountering potential loop start: %s' % (
+                        repr( command ),
+                    )
+                )
             replacements = {}
             rewritten.append( command )
             continue
@@ -3985,7 +3995,8 @@ def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetf
         if fn == 'incr':
             if name in replacements:
                 if replacements[ name ].kind() == 'integer':
-                    log('[propagate-localfn-constants] incrementing constant local replacement: %s' % repr( command ) )
+                    if G_SHOW_OPTIMIZATIONS:
+                        log('[propagate-localfn-constants] incrementing constant local replacement: %s' % repr( command ) )
                     replacements[ name ] = Token(
                         location = replacements[ name ].location() ,
                         kind     = 'integer' ,
@@ -4004,7 +4015,8 @@ def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetf
         if fn == 'decr':
             if name in replacements:
                 if replacements[ name ].kind() == 'integer':
-                    log('[propagate-localfn-constants] decrementing constant local replacement: %s' % repr( command ) )
+                    if G_SHOW_OPTIMIZATIONS:
+                        log('[propagate-localfn-constants] decrementing constant local replacement: %s' % repr( command ) )
                     replacements[ name ] = Token(
                         location = replacements[ name ].location() ,
                         kind     = 'integer' ,
@@ -4025,6 +4037,38 @@ def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetf
             continue
         
         if fn == 'jumpIf':
+            rewritten.append( command )
+            continue
+        
+        if fn == 'update':
+            if rewritten and rewritten[-1].kind() == 'fnref':
+                fnref = rewritten[-1]
+                rewritten = rewritten[:-1]
+                rewritten.append( Token(
+                    location = command.location() ,
+                    kind     = 'localfn',
+                    value    = name + '.get',
+                ))
+                rewritten.append( fnref )
+                rewritten.append( Token(
+                    location = comamnd.location() ,
+                    kind = 'localfn',
+                    value = '$.call',
+                ))
+                rewritten.append( Token(
+                    location = command.location() ,
+                    kind     = 'localfn' ,
+                    value    = name + 'set',
+                ))
+            else:
+                rewritten.append( command )
+                continue
+        
+        if fn == 'call':
+            rewritten.append( command )
+            continue
+        
+        if fn == 'copy':
             rewritten.append( command )
             continue
         
@@ -4697,7 +4741,7 @@ def asm_stringize( ss ):
     bits      = []
     instr     = False
     for cc in ss:
-        if cc.lower() in ' abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()[]{}|,:':
+        if cc.lower() in ' abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()[]{}|,:-/':
             if instr:
                 bits.append( cc )
                 continue

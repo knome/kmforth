@@ -6,8 +6,8 @@
 # [: n
 # [: fib(n)
 :fibonacci
-  dup 2 <   # nth (nth<2)
-  $.leaveIf # <> nth | nth   # we return the given value on the stack by leaving it
+  dup 2 is-smaller-than # nth (nth<2)
+  $.leaveIf             # <> nth | nth   # we return the given value on the stack by leaving it
   
   dup 1 -   # nth (nth-1)
   fibonacci # nth f(nth-1)
@@ -25,7 +25,7 @@
   fibonacci  # [: i fib(i)
   printno    # [: i 
   1 +        # [: (i+1)
-  dup 36 <   # [: (i+1) ((i+1)<36)
+  dup 36 is-smaller-than # [: (i+1) ((i+1)<36)
   $loop.get  # [: (i+1) ((i+1)<36) <loop>
   $.jumpIf   # [: (i+1)
   pop

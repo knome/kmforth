@@ -137,6 +137,8 @@
     $call
   }
   
+  $.noopt
+  
   stack/callstack.get $callstack.set
   
   # the 'escape' function
@@ -229,4 +231,87 @@
   setz al         ; copy zf into the low bits of the register
   mov [r14-8],rax ; copy the register back to the top of the stack
   `
+;
+
+# this one is a bit complex, but will hopefully allow us to avoid deeply
+# nested structures for complex resource requirements
+# 
+# <nestables>...? <num-nestables> <combined-todo>
+# 
+# where a <nestable> is fn(*,<nesting-todo>) -> (calls: <result> <err> <nesting-todo>)
+# 
+# this function handles threading the stack of contexts together
+# so the user doesn't have to write out horrible deep contexts
+# 
+# this will run each nestable in reverse order
+# if any has an error, it will push <num-nestables> 0s to the stack and then that error before calling todo
+# if all are successes, it pushes all of their values from first to last to the stack and then a 0 for the error
+# 
+# eg
+# 
+#     [ { $t } "path/hello" $t.get io/with-existing-file ]
+#     [ { $t } "path/world" $t.get io/with-existing-file ]
+#     2
+#     [
+#       { $f1 $f2 }
+#       
+#       ... do stuff ...
+#       
+#     ]
+#     stack/with-unnested
+# 
+# would run the opener for "path/world", then "path/hello", then call <do stuff> with $f1=<hello file> $f2=<world file>
+# 
+:stack/with-nested
+  { $numNestings $todo }
+  
+  $numNestings.get 8 *
+  [ {$outputs -- $walker $index}
+  
+    $numNestings.get $index.set
+    
+    [
+      $index.get $index.decr 0 ==
+      [
+        $numNestings.get
+        [ {$i}
+          $outputs.get $i.get 8 * +
+          memory/peek-q
+        ]
+        for-range
+        
+        0 # no error
+        
+        $todo.call
+      ]
+      [
+        { $nesting }
+        
+        [ { $result $err }
+        
+          $err.get
+          [
+            # there was an error!
+            # just push zeros and then the error and call the todo
+            
+            $numNestings.get [0] repeat
+            $err.get
+            $todo.call
+          ]
+          [
+            $result.get $outputs.get $index.get 8 * +
+            memory/poke-q
+            $walker.call
+          ]
+          if
+        ]
+        $nesting.call
+      ]
+      if
+    ]
+    $walker.set
+    
+    $walker.call
+  ]
+  stack/with-stack-buffer
 ;

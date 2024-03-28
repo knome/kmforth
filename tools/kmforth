@@ -246,7 +246,7 @@ def main():
     callgraph, usedFns = analyze_functions( allFns, startname = startname )
     
     if options.optimize:
-        outFns = optimize( allFns, usedFns, callgraph, startname )
+        outFns = optimize( allFns, usedFns, callgraph, startname, uniques )
         # drop functions we optimized out
         callgraph, usedFns = analyze_functions( outFns, startname = startname )
     else:
@@ -1076,6 +1076,9 @@ class NamedFunction:
             body     = self._body.rewriting_locals( new ) ,
         )
     
+    def rewriting_parent( self, new ):
+        raise Exception( 'cannot change parent of nonclosure' )
+    
     def __init__(
         self        ,
         location    ,
@@ -1129,6 +1132,38 @@ class LambdaFunction:
             lambdaName = self._lambdaName                   ,
             parent     = self._parent                       ,
             body       = self._body.rewriting_locals( new ) ,
+        )
+    
+    def rewriting_parent( self, new ):
+        return LambdaFunction(
+            location   = self._location   ,
+            lambdaName = self._lambdaName ,
+            parent     = new              ,
+            body       = self._body       ,
+        )
+    
+    def rewriting_name( self, new ):
+        return LambdaFunction(
+            location   = self._location ,
+            lambdaName = new            ,
+            parent     = self._parent   ,
+            body       = self._body     ,
+        )
+    
+    def rewriting_nonlocals( self, varupdates ):
+        return LambdaFunction(
+            location   = self._location   ,
+            lambdaName = self._lambdaName ,
+            parent     = self._parent     ,
+            body       = self._body.rewriting_nonlocals( self._lambdaName, varupdates ),
+        )
+    
+    def rewriting_subfns( self, updates ):
+        return LambdaFunction(
+            location   = self._location   ,
+            lambdaName = self._lambdaName ,
+            parent     = self._parent     ,
+            body       = self._body.rewriting_subfns(updates),
         )
     
     def __init__(
@@ -1187,6 +1222,69 @@ class Body:
             subfns    = self._subfns    ,
         )
     
+    def rewriting_nonlocals( self, name, varupdates ):
+        # 
+        # don't rewrite matches to our args
+        # do rewrite any other matching locals
+        # the caller recurses so we don't have to
+        # caller also responsible for cleaning out locals
+        # so if they are there, don't
+        
+        localvars = dict(self._localvars)
+        
+        for varname in varupdates:
+            if varname in self._localargs:
+                raise Exception('implementation error: nonlocal rewrite contains local: %s' % repr(varname))
+        
+        newcommands = []
+        for command in self._commands:
+            if command.kind() == 'localfn':
+                if not command.value().startswith('$.'):
+                    name, action = command.value().split('.',1)
+                    if name in varupdates:
+                        newcommands.append(Token(
+                            location = command.location() ,
+                            kind     = 'localfn',
+                            value    = varupdates[name] + '.' + action
+                        ))
+                    else:
+                        newcommands.append(command)
+                else:
+                    newcommands.append(command)
+            else:
+                newcommands.append(command)
+        
+        return Body(
+            location  = self._location  ,
+            commands  = newcommands     ,
+            localargs = self._localargs ,
+            localvars = self._localvars ,
+            subfns    = self._subfns    ,
+        )
+    
+    def rewriting_subfns( self, updates ):
+        newcommands = []
+        for command in self._commands:
+            if command.kind() == 'subfn':
+                if command.value() in updates:
+                    newcommands.append(Token(
+                        location = command.location() ,
+                        kind     = 'subfn' ,
+                        value    = updates[command.value()] ,
+                    ))
+                else:
+                    newcommands.append( command )
+            else:
+                newcommands.append( command )
+        
+        return Body(
+            location  = self._location  ,
+            commands  = newcommands     ,
+            localargs = self._localargs ,
+            localvars = self._localvars ,
+            subfns    = self._subfns    ,
+        )
+    
     def __init__(
         self      ,
         location  ,
@@ -1200,7 +1298,7 @@ class Body:
         self._localargs = localargs
         self._localvars = localvars
         self._subfns    = subfns
-        
+    
     def body_details( self, name ):
         return BodyDetails(
             name      = name            ,
@@ -3399,7 +3497,7 @@ class NotStupidCoroutine:
 # fixing optimization is going to be a slog of ensuring that functions that are inlined
 # have their parentage appropriately rewritten so that their trampolines continue working
 
-def optimize( allfns, used, callgraph, startname ):
+def optimize( allfns, used, callgraph, startname, uniques ):
     notes = {}
     opted = {}
     
@@ -3422,6 +3520,7 @@ def optimize( allfns, used, callgraph, startname ):
         recursive = recursive         ,
         name      = startname         ,
         fn        = allfns[startname] ,
+        uniques   = uniques           ,
     )))]
     
     pendingNames = { startname }
@@ -3448,12 +3547,13 @@ def optimize( allfns, used, callgraph, startname ):
                 recursive = recursive      ,
                 name      = needed         ,
                 fn        = allfns[needed] ,
+                uniques   = uniques        ,
             ))))
             pendingNames.add( needed )
     
     return opted
 
-def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
+def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn, uniques ):
     
     for command in fn.body().commands():
         
@@ -3461,8 +3561,16 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
             if (yield command.value()):
                 recursive.add( command.value() )
         elif command.kind() == 'subfn':
-            if (yield command.value()):
-                recursive.add( command.value() )
+            subfns = [command.value()]
+            while subfns:
+                subfn = subfns.pop()
+                if (yield subfn):
+                    recursive.add( command.value() )
+                else:
+                    for subsubfn in opted[subfn].body().commands():
+                        if subsubfn.kind() == 'subfn':
+                            subfns.append(subsubfn.value())
+        
         elif command.kind() == 'localfn':
             pass
         elif command.kind() == 'integer':
@@ -3474,6 +3582,10 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
         elif command.kind() == 'fnref':
             if (yield command.value()):
                 recursive.add( command.value() )
+        elif command.kind() == 'FORWARDJUMPIF':
+            pass
+        elif command.kind() == 'JUMPTARGET':
+            pass
         else:
             raise Exception( 'unknown kind: %s' % repr( command.kind() ) )
     
@@ -3481,21 +3593,26 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
     updatedfn = fn
     while True:
         for optimizefn in [
-            # optimize_constants ,
-            # optimize_inline_nonrecursive_functions_of_less_than_threshold_commands_not_touching_the_control_stack ,
-            # disabled: see note below optimize_tailcall_last_function_call_if_no_locals ,
             optimize_inline_nonrecursive,
             optimize_perform_token_replacements,
             optimize_propagate_localfn_constants,
         ]:
-            changed, updatedfn = optimizefn(
+            changed, updatedfn, newclosures = optimizefn(
                 notes     = notes     ,
                 recursive = recursive ,
                 opted     = opted     ,
                 name      = name      ,
                 targetfn  = updatedfn ,
+                uniques   = uniques   ,
             )
-        
+            
+            for closure in newclosures:
+                allfns[closure.name().value()] = closure
+            
+            for closure in newclosures:
+                if (yield closure.name().value()):
+                    recursive.add(closure.name().value())
+            
         if changed:
             continue
         else:
@@ -3505,119 +3622,6 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn ):
     
     yield None
 
-def optimize_constants( notes, recursive, opted, name, targetfn ):
-    rewritten = []
-    changed   = False
-    for command in targetfn.body().commands():
-        if command.kind() == 'word':
-            if command.value() in notes and 'constant' in notes[ command.value() ]:
-                if G_SHOW_OPTIMIZATIONS:
-                    log( '[opt] replacing call in %s to %s with constant %s' % (
-                        repr( unmangle( name ) )                     ,
-                        repr( unmangle( command.value() ) )          ,
-                        repr( notes[ command.value() ]['constant'].simple() ) ,
-                    ))
-                changed = True
-                rewritten.append( notes[ command.value() ]['constant'] )
-            else:
-                rewritten.append( command )
-        else:
-            rewritten.append( command )
-    
-    if len( rewritten ) == 1 and rewritten[0].kind() in ['integer', 'string']:
-        if name not in notes:
-            notes[ name ] = {}
-        notes[ name ]['constant'] = rewritten[0]
-    
-    if changed:
-        return True, targetfn.rewriting_commands( rewritten )
-    else:
-        return False, targetfn
-
-def optimize_inline_nonrecursive_functions_of_less_than_threshold_commands_not_touching_the_control_stack(
-    notes     ,
-    recursive ,
-    opted     ,
-    name      ,
-    targetfn  ,
-):
-    rewritten = []
-    changed   = False
-    for command in targetfn.body().commands():
-        if command.kind() == 'word':
-            vv = command.value()
-            isRecursive = vv in recursive
-            # count commands and inline assembly bits
-            isLong = (
-                vv in opted
-                and
-                (
-                    len( opted[vv].body().commands() )
-                    +
-                    sum(
-                        len(e.value().split())
-                        for e in opted[vv].body().commands()
-                        if e.kind() == 'code'
-                    )
-                ) >= G_INLINE_THRESHOLD
-            )
-            hasLocals = vv in opted and len( opted[vv].body().localfns_names() ) > 0
-            hasCodeTouchingTheCallStack = (
-                vv in opted and any(
-                    (e.kind() == 'code' and 'r15' in e.value())
-                    for e in opted[vv].body().commands() 
-                )
-            )
-            if isRecursive or isLong or hasLocals or hasCodeTouchingTheCallStack:
-                # not optimizing it right now
-                rewritten.append( command )
-            else:
-                if G_SHOW_OPTIMIZATIONS:
-                    log( '[opt] inlining call to %s in %s' % ( repr( unmangle( command.value() ) ), repr( unmangle( name ) ) ) )
-                # optimizing it!
-                for subcommand in opted[vv].body().commands():
-                    rewritten.append( subcommand )
-    
-    if changed:
-        return True, targetfn.rewriting_commands( rewritten )
-    else:
-        return False, targetfn
-
-# this actually makes runtime worse, lol
-# probably nukes the return address prediction on the various return jumps
-# 
-def optimize_tailcall_last_function_call_if_no_locals(
-    notes     ,
-    recursive ,
-    opted     ,
-    name      ,
-    targetfn  ,
-):
-    commands = targetfn.body().commands()
-    if len( targetfn.body().localfns_names() ) == 0:
-        if commands:
-            if commands[-1].kind() == 'word':
-                if G_SHOW_OPTIMIZATIONS:
-                    log( '[opt] replacing call to %s at end of local-less function %s with jump' % (
-                        repr( unmangle( commands[-1].value() ) ) ,
-                        repr( unmangle( targetfn.name().value() ) ) ,
-                    ))
-                
-                rewritten = list( commands )[:-1]
-                rewritten.append( Token(
-                    location = commands[-1].location() ,
-                    kind     = 'fnref'                 ,
-                    value    = commands[-1].value()    ,
-                ))
-                rewritten.append( Token(
-                    location = commands[-1].location() ,
-                    kind     = 'localfn'               ,
-                    value    = '$.jump'                ,
-                ))
-                return True, targetfn.rewriting_commands( rewritten )
-    
-    return False, targetfn
-
 INLINED_LEAVEIF = '''
     ; inlined leaveIf (--> jumpForward)
     sub r14, 8
@@ -3626,12 +3630,11 @@ INLINED_LEAVEIF = '''
     jnz %(endlabel)s
 '''
 
-def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
+def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniques ):
     
     rewritten = []
     newlocals = []
-    
-    nextno = 1
+    newclosures = {} # old -> new
     
     changed = False
     
@@ -3672,7 +3675,6 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                     ))
                 rewritten.append( command )
             else:
-                    
                 if G_INLINE_ONLY:
                     m = G_INLINE_ONLY.match(unmangle( vv ))
                     if not m:
@@ -3695,9 +3697,9 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                 
                 if any( vv.kind() == 'localfn' and vv.value() == '$.noopt' for vv in opted[vv].body().commands() ):
                     if G_SHOW_OPTIMIZATIONS:
-                        debug('[inline-nonrecursive] refusing to inline in to %s due to "$.noopt" in %s' % (
+                        debug('[inline-nonrecursive] refusing to inline into %s due to "$.noopt" in %s' % (
                             repr( unmangle( name ) ) ,
-                            repr( unmange( vv ) ) ,
+                            repr( unmangle( vv ) ) ,
                         ))
                     rewritten.append( command )
                     continue
@@ -3710,26 +3712,82 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                             repr( unmangle( name ) ) ,
                         ))
                     
-                    inlineno = nextno
-                    nextno += 1
-                    
-                    end = '.' + vv + '.' + str(inlineno) + '.inline.end'
+                    end = '.' + vv + '.' + str(uniques.get()) + '.inline.end'
                     includeEndLabel = False
                     
+                    varupdates = {}
                     for sublocal in opted[vv].body().localvars():
-                        newlocals.append( ('$' + vv + '$' + str(inlineno) + sublocal[0], sublocal[1] ) )
+                        varupdates[ sublocal[0] ] = '$' + vv + '$' + str(uniques.get()) + sublocal[0]
+                        newlocals.append( (varupdates[sublocal[0]], sublocal[1]) )
+                    
+                    # gather all nested subfns
+                    # we will rewrite them in reverse order so we can swap out the names in the rewrites
+                    # 
+                    # (subfnId, varupdatesToPerform, subFnNewParent)
+                    subFnsToScan = []
+                    for subfn in opted[vv].body().commands():
+                        if subfn.kind() == 'subfn':
+                            if subfn.kind() == 'subfn':
+                                subFnsToScan.append( (subfn.value(),varupdates,name) )
+                    
+                    # (subfnId,newSubfnId,subvarupdates,subFnNewParent)
+                    remainingSubFns = []
+                    while subFnsToScan:
+                        (curSubFn,curvarupdates,curnewparent) = subFnsToScan.pop()
+                        newName = '$inline_' + str(uniques.get()) + '$' + curSubFn
+                        subvarupdates = dict(
+                            (k,v)
+                            for (k,v) in curvarupdates.items()
+                            if not opted[curSubFn].body().has_local(k)
+                        )
+                        remainingSubFns.append( (curSubFn,newName,subvarupdates,curnewparent) )
+                        for subfn in opted[curSubFn].body().commands():
+                            if subfn.kind() == 'subfn':
+                                subFnsToScan.append((subfn.value(),subvarupdates,newName))
+                    
+                    remainingSubFns = list(reversed(remainingSubFns))
+                    
+                    forwardJumpOptInlineNo = uniques.get()
+                    
+                    # we have to walk down the complete chain of subfns for the rewrite
+                    subFnRewrites = {}
+                    while remainingSubFns:
+                        cur = remainingSubFns.pop()
+                        (curSubFn, newName, varupdates, newParent) = cur
+                        subFnRewrites[curSubFn] = newName
+                         
+                        if newName in opted:
+                            raise Exception('wat')
+                        
+                        opted[newName] = (
+                            opted[curSubFn]
+                            .rewriting_name( subFnRewrites[curSubFn] )
+                            .rewriting_nonlocals( varupdates )
+                            .rewriting_subfns( subFnRewrites )
+                            .rewriting_parent( newParent )
+                        )
                     
                     for subcommand in opted[vv].body().commands():
                         if subcommand.kind() == 'localfn' and subcommand.value()[:2] != '$.':
-                            rewritten.append( Token(
-                                location = subcommand.location()          ,
-                                kind     = 'localfn'                      ,
-                                value    = '$' + vv + '$' + str(inlineno) + subcommand.value() ,
-                            ))
+                            lfname, lfaction = subcommand.value().split('.',1)
+                            # nonlocals won't appear in the locals rewrites, allowing them to
+                            # flow directly into parent functions
+                            if lfname in varupdates:
+                                rewritten.append( Token(
+                                    location = subcommand.location()               ,
+                                    kind     = 'localfn'                           ,
+                                    value    = varupdates[lfname] + '.' + lfaction ,
+                                ))
+                            else:
+                                rewritten.append( Token(
+                                    location = subcommand.location() ,
+                                    kind     = 'localfn'             ,
+                                    value    = subcommand.value()    ,
+                                ))
+                        
                         elif subcommand.kind() == 'localfn' and subcommand.value() == '$.leaveIf':
                             includeEndLabel = True
-                            uniqueno = nextno
-                            nextno += 1
+                            uniqueno = uniques.get()
                             rewritten.append( Token(
                                 location = subcommand.location() ,
                                 kind     = 'FORWARDJUMPIF'       ,
@@ -3739,19 +3797,25 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
                             rewritten.append( Token(
                                 location = subcommand.location() ,
                                 kind     = 'code'                ,
-                                value    = nest_labels( inlineno, vv, subcommand.value() ) ,
+                                value    = nest_labels( uniques.get(), vv, subcommand.value() ) ,
+                            ))
+                        elif subcommand.kind() == 'subfn':
+                            rewritten.append(Token(
+                                location = subcommand.location()             ,
+                                kind     = 'subfn'                           ,
+                                value    = subFnRewrites[subcommand.value()] ,
                             ))
                         elif subcommand.kind() == 'FORWARDJUMPIF':
                             rewritten.append( Token(
                                 location = subcommand.location() ,
                                 kind     = 'FORWARDJUMPIF'       ,
-                                value    = '.' + vv + '.' + str(inlineno) + subcommand.value() ,
+                                value    = '.' + vv + '.' + str(forwardJumpOptInlineNo) + subcommand.value() ,
                             ))
                         elif subcommand.kind() == 'JUMPTARGET':
                             rewritten.append( Token(
                                 location = subcommand.location() ,
                                 kind     = 'JUMPTARGET'          ,
-                                value    = '.' + vv + '.' + str(inlineno) + subcommand.value(),
+                                value    = '.' + vv + '.' + str(forwardJumpOptInlineNo) + subcommand.value(),
                             ))
                         else:
                             rewritten.append( subcommand )
@@ -3766,9 +3830,9 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn ):
             rewritten.append( command )
     
     if changed:
-        return True, targetfn.rewriting_locals( newlocals ).rewriting_commands( rewritten )
+        return True, targetfn.rewriting_locals( newlocals ).rewriting_commands( rewritten ), list(newclosures.values())
     else:
-        return False, targetfn
+        return False, targetfn, []
 
 def nest_labels( uniqueno, prefix, code ):
     if '===' not in code:
@@ -3808,7 +3872,11 @@ def nest_labels_munge( uniqueno, prefix, code ):
             rewritten.append( line )
     return '\n'.join(rewritten)
 
-def optimize_perform_token_replacements( notes, recursive, opted, name, targetfn ):
+# this optimization pass runs the programs encoded into assembly segments
+# that dictate various replacements optimizations that can be run to transform
+# the runtime assembly into compiletime token manipulations
+# 
+def optimize_perform_token_replacements( notes, recursive, opted, name, targetfn, uniques ):
     
     rewritten = []
     changed = False
@@ -3889,11 +3957,11 @@ def optimize_perform_token_replacements( notes, recursive, opted, name, targetfn
             rewritten.append( command )
     
     if changed:
-        return True, targetfn.rewriting_commands( rewritten )
+        return True, targetfn.rewriting_commands( rewritten ), []
     else:
-        return False, targetfn
+        return False, targetfn, []
 
-def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetfn ):
+def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetfn, uniques ):
     
     # we only propagate the locals here, we'll strip out unused sets in another step
     
@@ -4075,9 +4143,9 @@ def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetf
         raise Exception( '[propagate-localfn-constants] unknown localfn: %s' % repr( command ) )
     
     if changed:
-        return True, targetfn.rewriting_commands( rewritten )
+        return True, targetfn.rewriting_commands( rewritten ), []
     else:
-        return False, targetfn
+        return False, targetfn, []
 
 class Uniques:
     def __init__(
@@ -4858,6 +4926,23 @@ def unparse_code_sections( sections ):
         bits.append( '===' )
     
     return '\n'.join( bits[:-1] )
+
+#####
+
+class AsmFunction:
+    
+    def __init__(
+        self     ,
+        location ,
+        name     ,
+    ):
+        self._location = location
+        self._name     = name
+        self._chunks   = []
+        return
+    
+    def add_code( self, code ):
+        self._chunks.append( code )
 
 #####
 

@@ -1,0 +1,45 @@
+
+@ "standard" ;
+
+:sif 1 != [ "s" ][ "" ] if ;
+
+:main
+  { -- $i }
+  
+  99 $i.set
+  
+  [ $i.get 0 is-bigger-than ]
+  [
+    [ { $todo } $i.get      [ 0 $todo.call ] strings/with-unsigned-as-string ]
+    [ { $todo } $i.get decr [ 0 $todo.call ] strings/with-unsigned-as-string ]
+    2
+    [
+      { $is $ds $err }
+      
+      $err.get "something went wrong" errno/panic-on-error
+      
+      $is.get
+      " bottle"
+      $i.get sif
+      " of beer on the wall,\n"
+      $is.get
+      " bottle"
+      $i.get sif
+      " of beer,\n"
+      " take one down,\n"
+      " pass it around,\n"
+      $ds.get
+      " bottle"
+      $i.get decr sif
+      " of beer on the wall!\n\n"
+      14
+      syscall/STDOUT
+      write-strings
+      pop
+    ]
+    stack/with-nested
+    
+    $i.decr
+  ]
+  while
+;

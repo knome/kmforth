@@ -111,10 +111,8 @@
   
   # if there are no strings, don't bother
   # 
-  dup 0 ==                     #[: n=0 1 | ss=strings... n=1+ 0
+  $n.get dup 0 ==              #[: n=0 (n==0)=1 | ss=strings... n=1+ (n==0)=0
   $.leaveIf                    #[: <> 0 | ss... n
-  
-  $n.get                       #[: ss... n
   
   # determine the size of the
   # stack-buffer we need for

@@ -4,8 +4,10 @@
 log(){ >&2 echo "$@" ; }
 die(){ log "$@" ; exit 1 ; }
 
-standard(){
-    ./tools/compile $TESTPATH/TEST || die "failed to compile test $TESTPATH/TEST" ;
+run_test(){
+    OPTION=$1
+    
+    ./tools/compile $OPTION $TESTPATH/TEST || die "failed to compile test $TESTPATH/TEST" ;
     
     EXPECTEDCODE="0"
     if [ -e "$TESTPATH/EXITCODE" ] ; then
@@ -71,6 +73,9 @@ standard(){
 
 for TESTPATH in tests/* ;
 do
-    log "running test $TESTPATH/TEST" ;
-    standard "$TESTPATH"
+    log "running test for $TESTPATH/TEST" ;
+    run_test
+    # log "running test with --optimize for $TESTPATH/TEST" ;
+    # disabling until optimization is fixed
+    # run_test --optimize
 done

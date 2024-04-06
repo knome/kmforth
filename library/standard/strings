@@ -149,3 +149,15 @@
   (a      97)
   (z     122)
 );
+
+# [: s
+# [: <s[0] in {0..9}>
+# 
+:strings/startswith-digit
+  memory/peek-b
+  dup
+  strings/ascii-zero is-bigger-than-or-equal-to
+  swap
+  strings/ascii-nine is-smaller-than-or-equal-to
+  and
+;

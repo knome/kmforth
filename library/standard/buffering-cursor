@@ -1,0 +1,159 @@
+
+% buffering-cursor/BufferingCursor (@rc @st)
+  @ @rc @st (
+    (definition      type/pointer)
+    (base-cursor     type/pointer)
+    (inbuffer        type/pointer)
+    (inbuffer-size   type/u64)
+    (inbuffer-start  type/u64)
+    (inbuffer-end    type/u64)
+    (outbuffer       type/pointer)
+    (outbuffer-size  type/u64)
+    (outbuffer-start type/u64)
+    (outbuffer-end   type/u64)
+    (mode            type/u8)
+    (-padding        type/u8 7)
+  );
+;
+
+@ struct/define buffering-cursor/BufferingCursor ;
+
+:buffering-cursor/mode/full-buffering-output 0 ;
+:buffering-cursor/mode/line-buffering-output 1 ;
+
+#[: todo
+#[: (calls: &$with-buffering-cursor todo)
+#
+:buffering-cursor/with-buffering-cursors
+  { $todo-with-buffering-cursors }
+  
+  [ { $definition }
+    
+    &buffering-cursor/-read  $definition.get ~cursor/CursorDefinition//read.set
+    &buffering-cursor/-write $definition.get ~cursor/CursorDefinition//write.set
+    &buffering-cursor/-tell  $definition.get ~cursor/CursorDefinition//tell.set
+    &buffering-cursor/-seek  $definition.get ~cursor/CursorDefinition//seek.set
+    &buffering-cursor/-start $definition.get ~cursor/CursorDefinition//start.set
+    &buffering-cursor/-end   $definition.get ~cursor/CursorDefinition//end.set
+    &buffering-cursor/-close $definition.get ~cursor/CursorDefinition//close.set
+    &buffering-cursor/-flush $definition.get ~cursor/CursorDefinition//flush.set
+    
+    [ { $base-cursor $inbuffer-size $inbuffer $outbuffer-size $outbuffer $mode $todo-with-buffering-cursor }
+      buffering-cursor/BufferingCursor.size
+      [ { $cursor }
+        
+        $definition.get     $cursor.get buffering-cursor/BufferingCursor//definition.set
+        $base-cursor.get    $cursor.get buffering-cursor/BufferingCursor//base-cursor.set
+        $inbuffer.get       $cursor.get buffering-cursor/BufferingCursor//inbuffer.set
+        $inbuffer-size.get  $cursor.get buffering-cursor/BufferingCursor//inbuffer-size.set
+        0                   $cursor.get buffering-cursor/BufferingCursor//inbuffer-start.set
+        0                   $cursor.get buffering-cursor/BufferingCursor//inbuffer-end.set
+        $outbuffer.get      $cursor.get buffering-cursor/BufferingCursor//outbuffer.set
+        $outbuffer-size.get $cursor.get buffering-cursor/BufferingCursor//outbuffer-size.set
+        0                   $cursor.get buffering-cursor/BufferingCursor//outbuffer-start.set
+        0                   $cursor.get buffering-cursor/BufferingCursor//outbuffer-end.set
+        $mode.get           $cursor.get buffering-cursor/BufferingCursor//mode.set
+        
+        $cursor.get 0 $todo-with-buffering-cursor.call
+      ]
+      stack/with-stack-buffer
+    ]
+    $todo-with-buffering-cursors.call
+  ]
+  ~cursor/with-definition
+;
+
+# amount buffer cursor -> amount-read err
+: buffering-cursor/-read
+  dup buffering-cursor/BufferingCursor//inbuffer.get
+  [
+    # if there is an input buffer:
+    #   if there is sufficient data in the input buffer, simply return it
+    #   if there is insufficient data in the input buffer, return the partial data
+    #   if there is no data in the input buffer, attempt to fill it
+    pop pop pop 0 "buffering-cursor/-read unimplemented"
+  ]
+  [
+    # if there is not an input buffer, pass the call through
+    buffering-cursor/BufferingCursor//base-cursor.get ~cursor/read
+  ]
+  if
+;
+
+# amount buffer cursor -> amount-written err
+: buffering-cursor/-write
+  dup buffering-cursor/BufferingCursor//outbuffer.get
+  [
+    # if there is an input buffer
+    #   limit the write to the space remaining in the buffer and copy the data into our outbuffer
+    
+    # if we are performing line-wise output, scan for newline and output up to the newline if found
+    
+    dup buffering-cursor/BufferingCursor//mode.get
+    [
+      # line buffering
+      pop pop pop 0 "buffering cursor line buffering mode unimplemented"
+    ]
+    [
+      # full buffering
+      { $amount $buffer $cursor }
+      
+      # $cursor.get buffering-cursor/BufferingCursor//outbuffer-remaining.get
+      0 "buffering cursor full bufering mode unimplemented"
+    ]
+    if
+    
+    # otherwise output when the buffer is filled
+  ]
+  [
+    # if there is not an input buffer, we just pass through the request
+    buffering-cursor/BufferingCursor//base-cursor.get ~cursor/write
+  ]
+  if
+;
+
+# always passthrough, calls responsibility to flush first
+: buffering-cursor/-tell
+  buffering-cursor/BufferingCursor//base-cursor.get ~cursor/tell
+;
+
+# seeking empties the inbuffer for the next few functions
+
+: buffering-cursor/-reset-inbuffer
+  dup 0 swap buffering-cursor/BufferingCursor//inbuffer-start.set
+      0 swap buffering-cursor/BufferingCursor//inbuffer-end.set
+;
+
+: buffering-cursor/-seek
+  dup buffering-cursor/-reset-inbuffer
+  buffering-cursor/BufferingCursor//base-cursor.get ~cursor/tell
+;
+
+: buffering-cursor/-start
+  dup buffering-cursor/-reset-inbuffer
+  buffering-cursor/BufferingCursor//base-cursor.get ~cursor/start
+;
+
+: buffering-cursor/-end
+  dup buffering-cursor/-reset-inbuffer
+  buffering-cursor/BufferingCursor//base-cursor.get ~cursor/end
+;
+
+# may want to revisit this, but I'm thinking for now it should be closed directly rather than via the buffering-cursor
+# so we'll just ignore close commands here
+# (honestly, closing isn't really a cursor function at all. we should probably remove it)
+# 
+: buffering-cursor/-close pop ;
+
+: buffering-cursor/-flush
+  dup buffering-cursor/BufferingCursor//outbuffer.get
+  [
+    # if there is an output buffer, drain it and then flush the underlying cursor
+    pop "buffering-cursor/-flush unimplemented"
+  ]
+  [
+    # otherwise just pass it through
+    buffering-cursor/BufferingCursor//base-cursor.get ~cursor/flush
+  ]
+  if
+;

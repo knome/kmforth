@@ -29,6 +29,7 @@
     &buffer-cursor/-start $buffer-cursor-definition.get ~cursor/CursorDefinition//start.set
     &buffer-cursor/-end   $buffer-cursor-definition.get ~cursor/CursorDefinition//end.set
     &buffer-cursor/-close $buffer-cursor-definition.get ~cursor/CursorDefinition//close.set
+    &buffer-cursor/-flush $buffer-cursor-definition.get ~cursor/CursorDefinition//flush.set
     
     # define the new buffer cursor function
     # instead of merely wrapping a buffer, we actually create one!
@@ -151,3 +152,6 @@
 
 # cursor -> <>
 :buffer-cursor/-close "buffer-cursor/-close unimplemented" panic ;
+
+# cursor -> err
+:buffer-cursor/-flush pop 0 ;

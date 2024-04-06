@@ -16,3 +16,4 @@
 @ "./string-cursor" ;
 @ "./buffer-cursor" ;
 @ "./file-cursor" ;
+@ "./buffering-cursor" ;

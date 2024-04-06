@@ -24,6 +24,7 @@
     &string-cursor/-seek  $string-cursor-definition.get ~cursor/CursorDefinition//seek.set
     &string-cursor/-start $string-cursor-definition.get ~cursor/CursorDefinition//start.set
     &string-cursor/-close $string-cursor-definition.get ~cursor/CursorDefinition//close.set
+    &string-cursor/-flush $string-cursor-definition.get ~cursor/CursorDefinition//flush.set
     
     # define new string cursor function
     # 
@@ -146,3 +147,5 @@
 
 # as strings don't really close, just ignore any requests to
 :string-cursor/-close pop ;
+
+:string-cursor/-flush pop "string-cursor is not writable, and therefore not flushable" ;

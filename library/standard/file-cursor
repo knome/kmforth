@@ -34,6 +34,7 @@
     &file-cursor/-start $definition.get ~cursor/CursorDefinition//start.set
     &file-cursor/-end   $definition.get ~cursor/CursorDefinition//end.set
     &file-cursor/-close $definition.get ~cursor/CursorDefinition//close.set
+    &file-cursor/-flush $definition.get ~cursor/CursorDefinition//flush.set
 
     #[: fd open-method==use-existing-fd todo
     #[:   or
@@ -111,7 +112,7 @@
         $open-method.get file-cursor/open-existing-file ==
         [
           $path-or-fd.get
-          syscall/open/opt/readonly
+          syscall/open/opt/readwrite
           syscall/open/mode/standard-file
           syscall/open
           
@@ -152,7 +153,7 @@
 ;
 
 # amount buffer cursor -> amount-written err
-:file-cursor/-write
+:file-cursor/-write 
   dup file-cursor/FileCursor//closed.get
   [
     pop pop pop 0 "file is closed"
@@ -256,3 +257,7 @@
   ]
   if
 ;
+
+# file-cursors are raw i/o, so flush is a no-op
+# cursor -> err
+:file-cursor/-flush pop 0 ;

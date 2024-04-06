@@ -54,94 +54,26 @@
     # no point in swapping a byte
 );
 
-#[: string-address
-#[: u32 0 | 0 err
-: network/ip4-address-to-u32 { $s -- $r }
-   
-   0                                             #[: total
-   
-   $s.get                                        #[: total s
-   
-   conv/string-to-integer-and-rest               #[: total rest value
-   
-   # if s == r the string wasn't a number
-   # 
-   swap $r.copy $s.get == dup                    #[: total value (rest==s) (rest==s)
-   [ pop pop pop
-     0 "bad-format: missing first number" 1
-   ] $.callIf                                    #[: 0 err 1 | total value ((rest==s)=0)
-   $.leaveIf                                     #[: <> 0 err | total value
-   256 * +                                       #[: (total+onebyte)
-   
-   $r.get memory/peek-b strings/ascii-dot != dup #[: total (rest[0]!='.') (rest[0]!='.')
-   
-   [ pop pop
-     0 "bad-format: missing first '.'" 1
-   ] $.callIf                                    #[: 0 err 1 | total (rest[0]!='.')=0
-   $.leaveIf                                     #[: <> 0 err | total
-   
-   $r.get 1 + dup $s.set                         #[: total s
-   
-   conv/string-to-integer-and-rest               #[: total rest value
-   
-   # if s == r the string wasn't a number
-   # 
-   swap $r.copy $s.get == dup                    #[: total value (rest==s) (rest==s)
-   [ pop pop pop
-     0 "bad-format: missing second number" 1
-   ] $.callIf                                    #[: 0 err 1 | total value ((rest==s)=0)
-   $.leaveIf                                     #[: <> 0 err | total value
-   256 * +                                       #[: (total+onebyte)
-   
-   $r.get memory/peek-b strings/ascii-dot != dup #[: total (rest[0]!='.') (rest[0]!='.')
-   
-   [ pop pop
-     0 "bad-format: missing second '.'" 1
-   ] $.callIf                                    #[: 0 err 1 | total (rest[0]!='.')=0
-   $.leaveIf                                     #[: <> 0 err | total
-   
-   $r.get 1 + dup $s.set                         #[: total s
-   
-   conv/string-to-integer-and-rest               #[: total rest value
-   
-   # if s == r the string wasn't a number
-   # 
-   swap $r.copy $s.get == dup                    #[: total value (rest==s) (rest==s)
-   [ pop pop pop
-     0 "bad-format: missing third number" 1
-   ] $.callIf                                    #[: 0 err 1 | total value ((rest==s)=0)
-   $.leaveIf                                     #[: <> 0 err | total value
-   256 * +                                       #[: (total+onebyte)
-   
-   $r.get memory/peek-b strings/ascii-dot != dup #[: total (rest[0]!='.') (rest[0]!='.')
-   
-   [ pop pop
-     0 "bad-format: missing third '.'" 1
-   ] $.callIf                                    #[: 0 err 1 | total (rest[0]!='.')=0
-   $.leaveIf                                     #[: <> 0 err | total
-   
-   $r.get 1 + dup $s.set                         #[: total s
-   
-   conv/string-to-integer-and-rest               #[: total rest value
-   
-   # if s == r the string wasn't a number
-   # 
-   swap $r.copy $s.get == dup                    #[: total value (rest==s) (rest==s)
-   [ pop pop pop
-     0 "bad-format: missing fourth number" 1
-   ] $.callIf                                    #[: 0 err 1 | total value ((rest==s)=0)
-   $.leaveIf                                     #[: <> 0 err | total value
-   256 * +                                       #[: (total+onebyte)
-   
-   $r.get memory/peek-b strings/ascii-nul != dup #[: total (rest[0]!='\0') (rest[0]!='\0')
-   
-   [ pop pop
-     0 "bad-format: trash at end of addr" 1
-   ] $.callIf                                    #[: 0 err 1 | total (rest[0]!='.')=0
-   $.leaveIf                                     #[: <> 0 err | total
-   
-   0                                             #[: total 0
-;
+
+# #[: string-address
+# #[: u32 0 | 0 err
+# : network/ip4-address-to-u32 { -- $t }
+#   
+#   0 $t.set                                                   #[: s
+#   
+#   dup strings/startswith-digit not                           #[: s isdigit=(!s[0].startswith(0..9))
+#   dup                                    ff                  #[: s isdigit isdigit
+#   [ pop 0 "value does not start with a number" 1 ] $.callIf  #[: 0 err 1 | s isdigit
+#   $.leaveIf                                                  #[: 0 err <> | s
+#   
+#   conv/string-to-integer-and-rest                            #[: n rest
+#   swap [+] $t.update                                         #[: rest
+#   
+#   dup memory/peek-b strings/ascii-dot ==                     #[: rest isdot=(rest[0]=='.')
+#   dup                                                        #[: rest isdot isdot
+#   [ pop 0 "missing first '.' in ipv4 address" ] $
+# ;
+
 
 #[: string
 #[: number

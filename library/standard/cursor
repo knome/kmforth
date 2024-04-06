@@ -18,6 +18,7 @@
     (start type/pointer) # cursor -> err
     (end   type/pointer) # cursor -> err
     (close type/pointer) # cursor
+    (flush type/pointer) # cursor -> err
   );
 ;
 
@@ -170,8 +171,17 @@
 # position cursor -> err
 : ~cursor/seek  dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//seek.call  ;
 
+# cursor -> err
+: ~cursor/start dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//start.call ;
+
+# cursor -> err
+: ~cursor/end dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//end.call ;
+
 # cursor -> <>
 : ~cursor/close dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//close.call ;
+
+# cursor -> err
+: ~cursor/flush dup ~cursor/Cursor//definition.get ~cursor/CursorDefinition//flush.call ;
 
 # extensions
 

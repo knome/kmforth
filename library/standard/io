@@ -52,6 +52,12 @@
 # 
 :print "\n" 2 syscall/STDOUT write-strings [ 200 exit ] $.callIf ;
 
+# print strings off the stack
+#
+# [: strings... num-strings
+# [: -
+:print-strings "\n" swap incr syscall/STDOUT write-strings [ 201 exit ] $.callIf ;
+
 # print a number or die on failure
 # 
 # [: number

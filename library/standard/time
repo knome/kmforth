@@ -1,0 +1,52 @@
+
+#[: todo = [ {timespec err} ... ]
+#
+:time/with-now { $todo }
+  syscall/timespec.size
+  [ 
+    #                      #[: buffer
+    dup                    #[: buffer buffer
+    syscall/CLOCK-REALTIME #[: buffer buffer clocktype
+    swap                   #[: buffer clocktype buffer
+    syscall/clock-gettime  #[: buffer err
+    $todo.call
+  ]
+  stack/with-stack-buffer
+;
+
+# in the absence of an actual datetime library, we'll hack it
+:time/number-of-leap-seconds-since-1970 28 ;
+
+:time/seconds-per-minute    60 ;
+:time/seconds-per-hour    3600 ;
+:time/seconds-per-day    86400 ;
+
+:time/seconds-into-current-day
+  syscall/timespec//seconds.get
+  time/number-of-leap-seconds-since-1970
+  -
+  time/seconds-per-day
+  %
+;  
+
+#[: timespec
+#[: (0-23)
+:time/current-hour
+  time/seconds-into-current-day
+  time/seconds-per-hour
+  /
+;
+
+:time/current-minute
+  time/seconds-into-current-day
+  time/seconds-per-hour
+  %
+  time/seconds-per-minute
+  /
+;
+
+#[: timespec
+#[: (0|1)
+:time/is-ante-meridiem time/current-hour 12 is-smaller-than ;
+
+:time/is-post-meridiem time/is-ante-meridiem not ;

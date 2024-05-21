@@ -1,4 +1,16 @@
 
 @ "standard" ;
 
-:main "hello, world" print ;
+:main
+  [
+    #[: timespec err
+    "failed to gather time" errno/panic-on-error
+    
+    dup syscall/timespec//seconds.get      [ "Seconds        : " swap 2 print-strings ] strings/with-unsigned-as-string
+    dup syscall/timespec//microseconds.get [ "Microseconds   : " swap 2 print-strings ] strings/with-unsigned-as-string
+    dup time/current-hour                  [ "Current Hour   : " swap 2 print-strings ] strings/with-unsigned-as-string
+    dup time/current-minute                [ "Current Minute : " swap 2 print-strings ] strings/with-unsigned-as-string
+        time/is-ante-meridiem              [ "Ante Meridiem  : " swap 2 print-strings ] strings/with-unsigned-as-string
+  ]
+  time/with-now
+;

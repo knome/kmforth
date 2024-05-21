@@ -11,6 +11,7 @@
 @ "./gcarena" ;
 @ "./strings" ;
 @ "./networking" ;
+@ "./time" ;
 
 @ "./cursor" ;
 @ "./string-cursor" ;

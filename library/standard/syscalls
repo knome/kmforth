@@ -5,18 +5,19 @@
 :syscall/STDOUT 1 ;
 :syscall/STDERR 2 ;
 
-:syscall/SYSCALL-READ    0 ;
-:syscall/SYSCALL-WRITE   1 ;
-:syscall/SYSCALL-OPEN    2 ;
-:syscall/SYSCALL-CLOSE   3 ;
-:syscall/SYSCALL-FSTAT   5 ;
-:syscall/SYSCALL-LSEEK   8 ;
-:syscall/SYSCALL-MMAP    9 ;
-:syscall/SYSCALL-MUNMAP 11 ;
-:syscall/SYSCALL-WRITEV 20 ;
-:syscall/SYSCALL-SOCKET 41 ;
-:syscall/SYSCALL-BIND   49 ;
-:syscall/SYSCALL-EXIT   60 ;
+:syscall/SYSCALL-READ            0 ;
+:syscall/SYSCALL-WRITE           1 ;
+:syscall/SYSCALL-OPEN            2 ;
+:syscall/SYSCALL-CLOSE           3 ;
+:syscall/SYSCALL-FSTAT           5 ;
+:syscall/SYSCALL-LSEEK           8 ;
+:syscall/SYSCALL-MMAP            9 ;
+:syscall/SYSCALL-MUNMAP         11 ;
+:syscall/SYSCALL-WRITEV         20 ;
+:syscall/SYSCALL-SOCKET         41 ;
+:syscall/SYSCALL-BIND           49 ;
+:syscall/SYSCALL-EXIT           60 ;
+:syscall/SYSCALL-CLOCK-GETTIME 228 ;
 
 # [: <rdi> <syscall-no>
 # [: <rax> 0 | 0 <err>
@@ -48,6 +49,9 @@
   sub r14,8
   mov rdi,[r14]
   syscall
+  
+  mov [r14], rax
+  add r14, 8
   `
   dup 0 is-lesser-than
   [ 0 swap neg ]
@@ -396,4 +400,25 @@
   $relative-to.get
   syscall/SYSCALL-LSEEK
   syscall/three
+;
+
+% syscall/timespec (@rc @st)
+  @ @rc @st (
+    (seconds      type/u64)
+    (microseconds type/u64)
+  );
+;
+@ struct/define syscall/timespec ;
+
+:syscall/CLOCK-REALTIME           0 ;
+:syscall/CLOCK-MONOTONIC          1 ;
+:syscall/CLOCK-PROCESS_CPUTIME_ID 2 ;
+:syscall/CLOCK-THREAD_CPUTIME_ID  3 ;
+
+#[: clocktype buffer
+#[: err
+:syscall/clock-gettime
+  syscall/SYSCALL-CLOCK-GETTIME
+  syscall/two
+  swap pop # drop rax value, we're only interested in the error for this one
 ;

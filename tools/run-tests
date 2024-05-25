@@ -79,3 +79,5 @@ do
     # disabling until optimization is fixed
     # run_test --optimize
 done
+
+log 'all tests succeeded!'

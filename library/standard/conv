@@ -1,0 +1,54 @@
+
+# [: string
+# [: (remaining|0) unsigned 0 | err
+# 
+# remaining is 0 if there is no remaining string
+# it is not a pointer to the nul
+# 
+: conv/string-to-unsigned
+  { $s -- $t $first}
+  
+  0 $t.set
+  1 $first.set
+  
+  [
+      { $escape }
+      
+      [
+          { $b }
+          
+          $s.get memory/peek-b $b.set
+          
+          $b.get strings/ascii-zero is-smaller-than
+          $b.get strings/ascii-nine is-bigger-than
+          or
+          [
+              $first.get
+              [
+                  "conv/string-to-unsigned: no integer found at start of string"
+                  $escape.call
+              ]
+              when
+              
+              $b.get 0 ==
+              [
+                  0 $t.get 0
+              ]
+              [
+                  $s.get $t.get 0
+              ]
+              if
+              $escape.call
+          ]
+          when
+          
+          $s.incr
+          
+          0 $first.set
+          
+          [ 10 * $b.get 48 - + ] $t.update
+      ]
+      loop
+  ]
+  stack/with-escape
+;

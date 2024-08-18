@@ -93,6 +93,33 @@
   when
 ;
 
+#[: todo
+#[: calls ($propagate todo)
+#[:
+#[: $propagate is
+#[:   ? err cleanup
+#[:   calls cleanup if err
+#[:   leaves with-error-propagation
+#
+:errno/with-propagate-on-error
+  { $todo }
+  [
+    { $escape }
+    [
+      { $cleanup }
+      dup
+      [
+        $cleanup.call
+        $escape.call
+      ]
+      when
+      pop
+    ]
+    $todo.call
+  ]
+  stack/with-escape
+;
+
 # we can create expansion rules for taking lengths and maximums from macrolists
 # in order to generate a bunch of syscall/writes to properly align this without
 # resorting to the gross and errorsome (.[t].[a].[b].) character

@@ -340,7 +340,8 @@
 
 % syscall/bind/sockaddr-storage (@rc @st)
   @ @rc @st (
-    (sin-family type/u16)
+    (family type/u16)
+    (_      type/u8 126)
   );
 ;
 @ struct/define syscall/bind/sockaddr-storage ;
@@ -350,18 +351,20 @@
     (family     type/u16)
     (port       type/u16)
     (addr       type/u32)
-    # (-unused-   type/u64) # do we need this?
   );
 ;
 @ struct/define syscall/bind/sockaddr-in4 ;
 
 % syscall/bind/sockaddr-in6 (@rc @st)
   @ @rc @st (
-    (sin-family type/u16)
-    (sin-port   type/u16)
-    # unimplemented ipv6 shit
+    (family   type/u16)
+    (port     type/u16)
+    (flowinfo type/u32)
+    (addr     type/u8 16)
+    (scope-id type/u32)
   );
 ;
+@ struct/define syscall/bind/sockaddr-in6 ;
 
 # [: fd sockaddr-pointer server-address-size
 # [: 0 | err

@@ -1,1 +1,76 @@
 
+#[: string
+#[: ipv4addr 0 | err
+#
+:networking/string-to-ipv4-addr
+    { $s -- $addr }
+    
+    "000" print
+
+    0 $addr.set
+    
+    "111" print
+
+    [
+        { $propagate-on-error }
+        
+        "aaa" print
+
+        $s.get conv/string-to-unsigned [] $propagate-on-error.call
+        $s.get 255 is-bigger-than [ pop "first octet exceeds 255" ] $propagate-on-error.call
+        [+] $addr.update
+        $s.set
+        
+        "bbb" print
+        
+        $s.get 0 == [ pop "unexpected end of string after first octet" ] $propagate-on-error.call
+        $s.get "." strings/startswith not [ pop "expected '.' after first octet" ] $propagate-on-error.call
+        $s.incr
+        
+        "ccc" print
+
+        $s.get conv/string-to-unsigned [] $propagate-on-error.call
+        $s.get 255 is-bigger-than [ pop "second octet exceeds 255" ] $propagate-on-error.call
+        [256 * +] $addr.update
+        $s.set
+        
+        "ddd" print
+
+        $s.get 0 == [ pop "unexpected end of string after first octet" ] $propagate-on-error.call
+        $s.get "." strings/startswith not [ pop "expected '.' after first octet" ] $propagate-on-error.call
+        $s.incr
+        
+        "eee" print
+
+        $s.get conv/string-to-unsigned [] $propagate-on-error.call
+        $s.get 255 is-bigger-than [ pop "third octet exceeds 255" ] $propagate-on-error.call
+        [256 * +] $addr.update
+        $s.set
+        
+        "fff" print
+        
+        $s.get 0 == [ pop "unexpected end of string after first octet" ] $propagate-on-error.call
+        $s.get "." strings/startswith not [ pop "expected '.' after first octet" ] $propagate-on-error.call
+        $s.incr
+        
+        "ggg" print
+
+        $s.get conv/string-to-unsigned [] $propagate-on-error.call
+        $s.get 255 is-bigger-than [ pop "fourth octet exceeds 255" ] $propagate-on-error.call
+        [256 * +] $addr.update
+        $s.set
+        
+        "hhh" print
+
+        $s.get 0 != [ pop "data continued at expected end of string" ] $propagate-on-error.call
+        
+        "iii" print
+
+        $addr.get 0
+        
+        "jjj" print
+    ]
+    errno/with-propagate-on-error
+    
+    "kkk" print
+;

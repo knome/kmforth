@@ -161,3 +161,41 @@
   strings/ascii-nine is-smaller-than-or-equal-to
   and
 ;
+
+#[: string prefix
+#[: 0 | 1
+#
+:strings/startswith
+  { $s $p }
+  
+  [
+    { $escape }
+    [
+      $p.get memory/peek-b 0 == 
+      [
+        1 $escape.call
+      ]
+      when
+      
+      $s.get memory/peek-b 0 ==
+      [
+        0 $escape.call
+      ]
+      when
+      
+      $s.get memory/peek-b
+      $p.get memory/peek-b
+      ==
+      not
+      [
+        0 $escape.call
+      ]
+      when
+      
+      $s.incr
+      $p.incr
+    ]
+    loop
+  ]
+  stack/with-escape
+;

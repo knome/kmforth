@@ -28,10 +28,11 @@
 # let's use a local variable
 # the local variable is 8 bytes in size
 # it lives in the call-return stack, not the stack-stack
-:main { $neat } ;
+# local variables go after the -- in the variable definition thingy
+:main { -- $neat } ;
 
 # this one has a local variable that can hold a value of a specific size
-:main { $100.neat } ;
+:main { -- $100.neat } ;
 
 # to interact with locals, use the special functions defined for each local you name
 # just naming them doesn't mean anything, so DONT
@@ -49,7 +50,18 @@
 ;
 
 # this one is DONT
-:main { $neat } $neat ; # what are you doing? I said not to do this. dummy.
+# (it won't even compile because $neat isn't defined, only its local functions)
+:main { -- $neat } $neat ; # what are you doing? I said not to do this. dummy.
+
+# why is there a -- in the variable thingy?
+
+# this defines a local, and calls $neat.get automatically
+:something { $neat } ;
+
+# it calls .get from right to left so your variables line up with items on the stack
+# (if you think about it laying down from left to right)
+# stack "something" "hello" "world"
+:something { $hello $world } ; # "something" is still on the stack
 
 # this one has a lambda
 # the lambda just pushes the address of the lambda function onto the stack
@@ -67,7 +79,7 @@
 :main [ "hello" print ] call ;
 
 # let's call it a few times
-:main { $fn }
+:main { -- $fn }
   [ "hello" print ] $fn.set
   $fn.get call
   $fn.get call
@@ -81,7 +93,7 @@
 :main [ "hello" write ] loop ;
 
 # nonlocals are a thing
-:main { $a }
+:main { -- $a }
   "narp" $a.set
   $a.get print
   [ "yarp" $a.set ] call
@@ -89,24 +101,24 @@
 ;
 
 # works
-:main { $100.neat }
+:main { -- $100.neat }
   $neat.addr
 ;
 
 # does not work because .get, .set, and .here expect normal 8 byte locals
-:main { $100.neat }
+:main { -- $100.neat }
   $neat.here $neat.set $neat.get
 ;
 
 # works, but why are you even specifing the default local size? goober.
-:main { $8.neat }
+:main { -- $8.neat }
   $neat.here $neat.set $neat.get
 ;
 
 # this works for now because the compiler rounds up local sizes to a multiple of 8
 # but no promises it won't start packing single byte locals together into a single local entry
 # so if you DONT
-:main { $1.neat } $neat.get ;
+:main { -- $1.neat } $neat.get ;
 
 # if you don't know how this works, DONT
 :main

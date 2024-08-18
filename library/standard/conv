@@ -15,7 +15,7 @@
       { $escape }
       
       [
-          { $b }
+          { -- $b }
           
           $s.get memory/peek-b $b.set
           
@@ -38,6 +38,7 @@
                   $s.get $t.get 0
               ]
               if
+              
               $escape.call
           ]
           when

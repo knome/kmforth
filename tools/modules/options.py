@@ -11,7 +11,10 @@ class Options:
         for (k,v) in kwargs.items():
             setattr(self, k, v)
 
-def parse_options(args):
+def parse_options(
+    args                  ,
+    defaultImplementation ,
+):
     
     parser = optparse.OptionParser()
     
@@ -100,12 +103,14 @@ def parse_options(args):
         targetPath          = free[0]                     ,
         startname           = startname                   ,
         # architecture options
+        implementation      = defaultImplementation       ,
         trampolineSize      = options.trampolineSize      ,
         trampolineEndOffset = options.trampolineEndOffset ,
         # optimization options
         optimize            = options.optimize            ,
         inlineOnly          = options.inlineOnly          ,
         inlineExcept        = options.inlineExcept        ,
+        inlineThreshold     = 10                          ,
         # debugging options
         showExpansions      = options.showExpansions      ,
         showOptimizations   = options.showOptimizations   ,

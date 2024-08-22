@@ -37,6 +37,7 @@ from modules.unexpanded_function_definition import UnexpandedFunctionDefinition
 from modules.macro_list                     import MacroList
 from modules.named_arg_source               import NamedArgSource
 from modules.variations                     import Variations
+from modules.named_non_arg_source           import NamedNonArgSource
 
 class Parser:
     

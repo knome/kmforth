@@ -20,19 +20,12 @@ from modules.uniques             import Uniques
 from modules.context             import Context
 from modules.parser              import Parser
 from modules.mangling            import mangle, unmangle
+from modules.string_coalescer    import StringCoalescer
+from modules.optimizer           import Optimizer
 
 import modules.constants as constants
 
-
-IMPLEMENTATION = 'kmforth/python'
-
-G_SHOW_EXPANSIONS = False
 G_EXPANSION_ID = [0]
-G_SHOW_OPTIMIZATIONS = False
-G_DEBUG_OPTIMIZATIONS = False
-G_INLINE_THRESHOLD = 10
-G_INLINE_ONLY = None
-G_INLINE_EXCEPT = None
 
 def debug( *args, **kwargs ):
     if G_DEBUG_OPTIMIZATIONS:
@@ -44,33 +37,21 @@ def log( *args, **kwargs ):
     print( *args, **kwargs )
 
 def main():
-    options, err = parse_options(sys.argv)
+    options, err = parse_options(sys.argv, defaultImplementation = 'kmforth/python')
     if err:
         panic(err)
     
-    if options.showExpansions:
-        global G_SHOW_EXPANSIONS
-        G_SHOW_EXPANSIONS = True
-    
-    if options.showOptimizations:
-        global G_SHOW_OPTIMIZATIONS
-        G_SHOW_OPTIMIZATIONS = True
-        
-    if options.debugOptimizations:
-        global G_DEBUG_OPTIMIZATIONS
-        G_DEBUG_OPTIMIZATIONS = True
-        
     if options.inlineOnly:
         global G_INLINE_ONLY
         pattern = '.*(' + options.inlineOnly + ').*'
-        if G_SHOW_OPTIMIZATIONS:
+        if options.showOptimizations:
             log('[options] --inline-only pattern is %s' % repr( pattern ))
         G_INLINE_ONLY = re.compile( pattern )
     
     if options.inlineExcept:
         global G_INLINE_EXCEPT
         pattern = '.*(' + options.inlineExcept + ').*'
-        if G_SHOW_OPTIMIZATIONS:
+        if options.showOptimizations:
             log('[options] --inline-except pattern is %s' % repr( pattern ))
         G_INLINE_EXCEPT = re.compile( pattern )
     
@@ -83,18 +64,21 @@ def main():
         context = context ,
     )
     
+    optimizer = Optimizer()
+    
     compilationManager = CompilationManager(
-        options = options ,
-        context = context ,
-        parser  = parser  ,
+        options   = options   ,
+        context   = context   ,
+        parser    = parser    ,
+        optimizer = optimizer ,
     )
     
     fns, usedFns = compilationManager.compile_program(
-        options    = options                                                            ,
         targetPath = os.path.normpath( os.path.join( os.getcwd(), options.targetPath )) ,
     )
     
     code = generate_code(
+        options             = options                          ,
         functions           = fns                              ,
         usedFunctions       = usedFns                          ,
         startname           = options.startname                ,
@@ -103,46 +87,6 @@ def main():
     )
     
     print(code)
-
-#####
-
-class NamedNonArgSource:
-    def __init__(
-        self     ,
-        namer    ,
-        expander ,
-    ):
-        self._namer    = namer
-        self._expander = expander
-        return
-    
-    def namer(
-        self ,
-    ):
-        return self._namer
-    
-    def variations(
-        self ,
-    ):
-        return self._expander.non_argument_consuming_variations()
-
-#####
-
-#####
-
-class StringCoalescer:
-    def __init__(
-        self ,
-    ):
-        self._string2label = {}
-        return
-    
-    def lookup( self, ss ):
-        return self._string2label.get( ss, None )
-        
-    def remember( self, ss, label ):
-        self._string2label[ ss ] = label
-
 
 #####
 
@@ -202,62 +146,6 @@ class NotStupidCoroutine:
 # fixing optimization is going to be a slog of ensuring that functions that are inlined
 # have their parentage appropriately rewritten so that their trampolines continue working
 
-def optimize( allfns, used, callgraph, startname, uniques ):
-    notes = {}
-    opted = {}
-    
-    recursive = set()
-    
-    callees = callgraph
-    callers = {}
-    for (k,vv) in callees.items():
-        for v in vv:
-            if v not in callers:
-                callers[v] = set()
-            callers[v].add(k)
-    
-    pending = [(startname, NotStupidCoroutine(optimize_fn(
-        notes     = notes             ,
-        callees   = callees           ,
-        callers   = callers           ,
-        opted     = opted             ,
-        allfns    = allfns            ,
-        recursive = recursive         ,
-        name      = startname         ,
-        fn        = allfns[startname] ,
-        uniques   = uniques           ,
-    )))]
-    
-    pendingNames = { startname }
-    
-    while pending:
-        name, optgn = pending[-1]
-        needed = next( optgn, None )
-        if needed == None:
-            pendingNames.remove(pending[-1][0])
-            pending.pop()
-            if pending:
-                pending[-1][1].prepare_send(False)
-        elif needed in opted:
-            pending[-1][1].prepare_send(False)
-        elif needed in pendingNames:
-            pending[-1][1].prepare_send(True)
-        else:
-            pending.append( (needed,NotStupidCoroutine(optimize_fn(
-                notes     = notes          ,
-                callees   = callees        ,
-                callers   = callers        ,
-                opted     = opted          ,
-                allfns    = allfns         ,
-                recursive = recursive      ,
-                name      = needed         ,
-                fn        = allfns[needed] ,
-                uniques   = uniques        ,
-            ))))
-            pendingNames.add( needed )
-    
-    return opted
-
 def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn, uniques ):
     
     for command in fn.body().commands():
@@ -303,6 +191,7 @@ def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn, un
             optimize_propagate_localfn_constants,
         ]:
             changed, updatedfn, newclosures = optimizefn(
+                options   = options   ,
                 notes     = notes     ,
                 recursive = recursive ,
                 opted     = opted     ,
@@ -335,7 +224,7 @@ INLINED_LEAVEIF = '''
     jnz %(endlabel)s
 '''
 
-def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniques ):
+def optimize_inline_nonrecursive( options, notes, recursive, opted, name, targetfn, uniques ):
     
     rewritten = []
     newlocals = []
@@ -349,7 +238,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniqu
     for command in targetfn.body().commands():
         
         if command.kind() == 'localfn' and command.value() == '$.noopt':
-            if G_SHOW_OPTIMIZATIONS:
+            if options.showOptimizations:
                 debug('[inline-nonrecursive] refusing to optimize due to $.noopt in %s' % repr( unmangle( name ) ) )
             changed = False
             break
@@ -365,7 +254,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniqu
             )
             
             if isRecursive:
-                if G_SHOW_OPTIMIZATIONS:
+                if options.showOptimizations:
                     debug('[inline-nonrecursive] refusing to inline %s into %s because it is recursive' % (
                         repr( unmangle( vv ) ) ,
                         repr( unmangle( name ) ) ,
@@ -373,27 +262,27 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniqu
                 rewritten.append( command )
             elif hasCodeTouchingTheCallStack:
                 # no optimization for you
-                if G_SHOW_OPTIMIZATIONS:
+                if options.showOptimizations:
                     debug('[inline-nonrecursive] refusing to inline into %s due to use of r15 in assembly in %s' % (
                         repr( unmangle( name ) ) ,
                         repr( unmangle( vv ) ) ,
                     ))
                 rewritten.append( command )
             else:
-                if G_INLINE_ONLY:
+                if options.inlineOnly:
                     m = G_INLINE_ONLY.match(unmangle( vv ))
                     if not m:
-                        if G_SHOW_OPTIMIZATIONS:
+                        if options.showOptimizations:
                             debug('[inline-nonrecursive] refusing to inline %s, does not match --inline-only regex' % (
                                 repr( unmangle( vv ) ),
                             ))
                         rewritten.append( command )
                         continue
                 
-                if G_INLINE_EXCEPT:
+                if options.inlineExcept:
                     m = G_INLINE_EXCEPT.match(unmangle( vv ))
                     if m:
-                        if G_SHOW_OPTIMIZATIONS:
+                        if options.showOptimizations:
                             debug('[inline-nonrecursive] refusing to inline %s, matches --inline-except regex' % (
                                 repr( unmangle( vv ) ),
                             ))
@@ -401,7 +290,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniqu
                         continue
                 
                 if any( vv.kind() == 'localfn' and vv.value() == '$.noopt' for vv in opted[vv].body().commands() ):
-                    if G_SHOW_OPTIMIZATIONS:
+                    if options.showOptimizations:
                         debug('[inline-nonrecursive] refusing to inline into %s due to "$.noopt" in %s' % (
                             repr( unmangle( name ) ) ,
                             repr( unmangle( vv ) ) ,
@@ -411,7 +300,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniqu
                 else:
                     changed = True
                     
-                    if G_SHOW_OPTIMIZATIONS:
+                    if options.showOptimizations:
                         log( '[inline-nonrecursive] inlining call to %s in %s' % (
                             repr( unmangle( command.value() ) ) ,
                             repr( unmangle( name ) ) ,
@@ -502,7 +391,7 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniqu
                             rewritten.append( Token(
                                 location = subcommand.location() ,
                                 kind     = 'code'                ,
-                                value    = nest_labels( uniques.get(), vv, subcommand.value() ) ,
+                                value    = nest_labels( options, uniques.get(), vv, subcommand.value() ) ,
                             ))
                         elif subcommand.kind() == 'subfn':
                             rewritten.append(Token(
@@ -539,14 +428,14 @@ def optimize_inline_nonrecursive( notes, recursive, opted, name, targetfn, uniqu
     else:
         return False, targetfn, []
 
-def nest_labels( uniqueno, prefix, code ):
+def nest_labels( options, uniqueno, prefix, code ):
     if '===' not in code:
         return nest_labels_munge( uniqueno, prefix, code )
     
-    sections = parse_code_sections( IMPLEMENTATION, code )
+    sections = parse_code_sections( options.implementation, code )
     
     for section in sections:
-        if not (section['headers'].get('impl',IMPLEMENTATION) == IMPLEMENTATION):
+        if not (section['headers'].get('impl', options.implementation) == options.implementation):
             continue
         elif not (section['headers'].get('type','code') == 'code'):
             continue
@@ -859,6 +748,7 @@ def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetf
 # goto command
 
 def generate_code(
+    options             ,
     functions           ,
     usedFunctions       ,
     startname           ,
@@ -992,8 +882,8 @@ def generate_code(
                 code.append( '\n' )
                 code.append( '; including code literal\n' )
                 code.append( fetch_code(
-                    impl = IMPLEMENTATION ,
-                    data = command.value() ,
+                    options = options         ,
+                    data    = command.value() ,
                 ))
                 code.append( '\n' )
                 
@@ -1536,24 +1426,24 @@ def asm_stringize( ss ):
     
     return ''.join( bits )
 
-def fetch_code( impl, data ):
+def fetch_code( options, data ):
     if '===' not in data:
         return data
     
-    for section in parse_code_sections( impl, data ):
+    for section in parse_code_sections( options, data ):
         
-        if not (section['headers'].get('impl', impl) == impl):
-            if G_SHOW_OPTIMIZATIONS:
+        if not (section['headers'].get('impl', options.implementation) == options.implementation):
+            if options.showOptimizations:
                 debug( '[fetch-code] skipping section, wrong impl: %s' % repr( section ) )
             continue
         
         if not (section['headers'].get('type','code') == 'code'):
-            if G_SHOW_OPTIMIZATIONS:
+            if options.showOptimizations:
                 debug( '[fetch-code] skipping section, wrong type: %s' % repr( section ) )
             continue
         
         if not (section['headers'].get('when', '').strip() == ''):
-            if G_SHOW_OPTIMIZATIONS:
+            if options.showOptimizations:
                 debug( '[fetch-code] skipping section, has conditional: %s' % repr( section ) )
             continue
         

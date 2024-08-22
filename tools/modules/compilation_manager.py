@@ -10,18 +10,19 @@ from modules.source       import Source
 class CompilationManager:
     
     def __init__(
-        self    ,
-        options ,
-        context ,
-        parser  ,
+        self      ,
+        options   ,
+        context   ,
+        parser    ,
+        optimizer ,
     ):
-        self._options = options
-        self._context = context
-        self._parser  = parser
+        self._options   = options
+        self._context   = context
+        self._parser    = parser
+        self._optimizer = optimizer
     
     def compile_program(
         self       ,
-        options    ,
         targetPath ,
     ):
         seen    = set()
@@ -29,7 +30,7 @@ class CompilationManager:
             origin      = '(main compilation target)' ,
             cwd         = os.getcwd()                 ,
             path        = targetPath                  ,
-            libraryPath = options.libraryPath         ,
+            libraryPath = self._options.libraryPath   ,
         )]
         
         allNames  = set()
@@ -135,8 +136,8 @@ class CompilationManager:
         
         callgraph, usedFns = self.analyze_functions( allFns, startname = self._options.startname )
         
-        if options.optimize:
-            outFns = optimize( allFns, usedFns, callgraph, self._options.startname, uniques )
+        if self._options.optimize:
+            outFns = self._optimizer.optimize( allFns, usedFns, callgraph, self._options.startname, uniques )
             # drop functions we optimized out
             callgraph, usedFns = self.analyze_functions( outFns, startname = self._options.startname )
         else:

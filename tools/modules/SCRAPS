@@ -1,0 +1,672 @@
+
+# below is a bunch of old optimization experiments I'm hanging onto for a minute
+# while I build the new optimization backend for the abstract generation branch
+
+# possible opts
+# 
+# constant propagation:
+#   if a function just produces a constant, replace it with that constant in the caller
+# function inlining:
+#   if a function doesn't recurse
+#   and is under some threshold for number of commands used in the callee
+#   inline its locals and commands into the calling function
+# branch pruning
+#   if a conditional call would work against a constant, replace it with the call or a pop
+# unused local/constant pruning
+#   if a local or constant isn't used, don't bother to set it
+# call pruning
+#   if a function is side effect free and its value isn't used, don't bother to call it
+# return elision:
+#   if a function does not have any locals
+#   tail call to the last function called in that function
+#   flattens the return stack avoid unnecessary return chains
+# assembly register and constant alternatives
+#   a syntax for annotating assembly segments with short code segments
+#   that can be used for replacing it with alternate code or constants
+#   where appropriate
+
+# immediately triggering the other function to run is dumb
+# it makes writing simple loops a pain
+# it should still wait for the next, just with a value set to return
+# otherwise it makes writing logic for it unnecessarily hairy
+# 
+class NotStupidCoroutine:
+    def __init__(
+        self   ,
+        actual ,
+    ):
+        self._actual  = iter(actual)
+        self._pending = ()
+    
+    def __iter__( self ):
+        return self
+    
+    def __next__( self ):
+        if self._pending:
+            p = self._pending[0]
+            self._pending = None
+            return self._actual.send(p)
+        else:
+            return next(self._actual)
+    
+    def prepare_send( self, value ):
+        if self._pending:
+            raise Exception( 'cannot stage yield-expression value when already set' )
+        else:
+            self._pending = (value,)
+
+# fixing optimization is going to be a slog of ensuring that functions that are inlined
+# have their parentage appropriately rewritten so that their trampolines continue working
+
+def optimize_fn( notes, callees, callers, opted, allfns, recursive, name, fn, uniques ):
+    
+    for command in fn.body().commands():
+        
+        if command.kind() == 'word':
+            if (yield command.value()):
+                recursive.add( command.value() )
+        elif command.kind() == 'subfn':
+            subfns = [command.value()]
+            while subfns:
+                subfn = subfns.pop()
+                if (yield subfn):
+                    recursive.add( command.value() )
+                else:
+                    for subsubfn in opted[subfn].body().commands():
+                        if subsubfn.kind() == 'subfn':
+                            subfns.append(subsubfn.value())
+        
+        elif command.kind() == 'localfn':
+            pass
+        elif command.kind() == 'integer':
+            pass
+        elif command.kind() == 'code':
+            pass
+        elif command.kind() == 'string':
+            pass
+        elif command.kind() == 'fnref':
+            if (yield command.value()):
+                recursive.add( command.value() )
+        elif command.kind() == 'FORWARDJUMPIF':
+            pass
+        elif command.kind() == 'JUMPTARGET':
+            pass
+        else:
+            raise Exception( 'unknown kind: %s' % repr( command.kind() ) )
+    
+    changed   = False
+    updatedfn = fn
+    while True:
+        for optimizefn in [
+            optimize_inline_nonrecursive,
+            optimize_perform_token_replacements,
+            optimize_propagate_localfn_constants,
+        ]:
+            changed, updatedfn, newclosures = optimizefn(
+                options   = options   ,
+                notes     = notes     ,
+                recursive = recursive ,
+                opted     = opted     ,
+                name      = name      ,
+                targetfn  = updatedfn ,
+                uniques   = uniques   ,
+            )
+            
+            for closure in newclosures:
+                allfns[closure.name().value()] = closure
+            
+            for closure in newclosures:
+                if (yield closure.name().value()):
+                    recursive.add(closure.name().value())
+            
+        if changed:
+            continue
+        else:
+            break
+    
+    opted[ name ] = updatedfn
+    
+    yield None
+
+INLINED_LEAVEIF = '''
+    ; inlined leaveIf (--> jumpForward)
+    sub r14, 8
+    mov rax, [r14]
+    test rax,rax
+    jnz %(endlabel)s
+'''
+
+def optimize_inline_nonrecursive( options, notes, recursive, opted, name, targetfn, uniques ):
+    
+    rewritten = []
+    newlocals = []
+    newclosures = {} # old -> new
+    
+    changed = False
+    
+    for localvar in targetfn.body().localvars():
+        newlocals.append( localvar )
+    
+    for command in targetfn.body().commands():
+        
+        if command.kind() == 'localfn' and command.value() == '$.noopt':
+            if options.showOptimizations:
+                debug('[inline-nonrecursive] refusing to optimize due to $.noopt in %s' % repr( unmangle( name ) ) )
+            changed = False
+            break
+        
+        if command.kind() == 'word':
+            vv = command.value()
+            isRecursive = vv in recursive
+            hasCodeTouchingTheCallStack = (
+                vv in opted and any(
+                    (e.kind() == 'code' and 'r15' in e.value())
+                    for e in opted[vv].body().commands()
+                )
+            )
+            
+            if isRecursive:
+                if options.showOptimizations:
+                    debug('[inline-nonrecursive] refusing to inline %s into %s because it is recursive' % (
+                        repr( unmangle( vv ) ) ,
+                        repr( unmangle( name ) ) ,
+                    ))
+                rewritten.append( command )
+            elif hasCodeTouchingTheCallStack:
+                # no optimization for you
+                if options.showOptimizations:
+                    debug('[inline-nonrecursive] refusing to inline into %s due to use of r15 in assembly in %s' % (
+                        repr( unmangle( name ) ) ,
+                        repr( unmangle( vv ) ) ,
+                    ))
+                rewritten.append( command )
+            else:
+                if options.inlineOnly:
+                    m = G_INLINE_ONLY.match(unmangle( vv ))
+                    if not m:
+                        if options.showOptimizations:
+                            debug('[inline-nonrecursive] refusing to inline %s, does not match --inline-only regex' % (
+                                repr( unmangle( vv ) ),
+                            ))
+                        rewritten.append( command )
+                        continue
+                
+                if options.inlineExcept:
+                    m = G_INLINE_EXCEPT.match(unmangle( vv ))
+                    if m:
+                        if options.showOptimizations:
+                            debug('[inline-nonrecursive] refusing to inline %s, matches --inline-except regex' % (
+                                repr( unmangle( vv ) ),
+                            ))
+                        rewritten.append( command )
+                        continue
+                
+                if any( vv.kind() == 'localfn' and vv.value() == '$.noopt' for vv in opted[vv].body().commands() ):
+                    if options.showOptimizations:
+                        debug('[inline-nonrecursive] refusing to inline into %s due to "$.noopt" in %s' % (
+                            repr( unmangle( name ) ) ,
+                            repr( unmangle( vv ) ) ,
+                        ))
+                    rewritten.append( command )
+                    continue
+                else:
+                    changed = True
+                    
+                    if options.showOptimizations:
+                        log( '[inline-nonrecursive] inlining call to %s in %s' % (
+                            repr( unmangle( command.value() ) ) ,
+                            repr( unmangle( name ) ) ,
+                        ))
+                    
+                    end = '.' + vv + '.' + str(uniques.get()) + '.inline.end'
+                    includeEndLabel = False
+                    
+                    varupdates = {}
+                    for sublocal in opted[vv].body().localvars():
+                        varupdates[ sublocal[0] ] = '$' + vv + '$' + str(uniques.get()) + sublocal[0]
+                        newlocals.append( (varupdates[sublocal[0]], sublocal[1]) )
+                    
+                    # gather all nested subfns
+                    # we will rewrite them in reverse order so we can swap out the names in the rewrites
+                    # 
+                    # (subfnId, varupdatesToPerform, subFnNewParent)
+                    subFnsToScan = []
+                    for subfn in opted[vv].body().commands():
+                        if subfn.kind() == 'subfn':
+                            if subfn.kind() == 'subfn':
+                                subFnsToScan.append( (subfn.value(),varupdates,name) )
+                    
+                    # (subfnId,newSubfnId,subvarupdates,subFnNewParent)
+                    remainingSubFns = []
+                    while subFnsToScan:
+                        (curSubFn,curvarupdates,curnewparent) = subFnsToScan.pop()
+                        newName = '$inline_' + str(uniques.get()) + '$' + curSubFn
+                        subvarupdates = dict(
+                            (k,v)
+                            for (k,v) in curvarupdates.items()
+                            if not opted[curSubFn].body().has_local(k)
+                        )
+                        remainingSubFns.append( (curSubFn,newName,subvarupdates,curnewparent) )
+                        for subfn in opted[curSubFn].body().commands():
+                            if subfn.kind() == 'subfn':
+                                subFnsToScan.append((subfn.value(),subvarupdates,newName))
+                    
+                    remainingSubFns = list(reversed(remainingSubFns))
+                    
+                    forwardJumpOptInlineNo = uniques.get()
+                    
+                    # we have to walk down the complete chain of subfns for the rewrite
+                    subFnRewrites = {}
+                    while remainingSubFns:
+                        cur = remainingSubFns.pop()
+                        (curSubFn, newName, varupdates, newParent) = cur
+                        subFnRewrites[curSubFn] = newName
+                         
+                        if newName in opted:
+                            raise Exception('wat')
+                        
+                        opted[newName] = (
+                            opted[curSubFn]
+                            .rewriting_name( subFnRewrites[curSubFn] )
+                            .rewriting_nonlocals( varupdates )
+                            .rewriting_subfns( subFnRewrites )
+                            .rewriting_parent( newParent )
+                        )
+                    
+                    for subcommand in opted[vv].body().commands():
+                        if subcommand.kind() == 'localfn' and subcommand.value()[:2] != '$.':
+                            lfname, lfaction = subcommand.value().split('.',1)
+                            # nonlocals won't appear in the locals rewrites, allowing them to
+                            # flow directly into parent functions
+                            if lfname in varupdates:
+                                rewritten.append( Token(
+                                    location = subcommand.location()               ,
+                                    kind     = 'localfn'                           ,
+                                    value    = varupdates[lfname] + '.' + lfaction ,
+                                ))
+                            else:
+                                rewritten.append( Token(
+                                    location = subcommand.location() ,
+                                    kind     = 'localfn'             ,
+                                    value    = subcommand.value()    ,
+                                ))
+                        
+                        elif subcommand.kind() == 'localfn' and subcommand.value() == '$.leaveIf':
+                            includeEndLabel = True
+                            uniqueno = uniques.get()
+                            rewritten.append( Token(
+                                location = subcommand.location() ,
+                                kind     = 'FORWARDJUMPIF'       ,
+                                value    = end                   ,
+                            ))
+                        elif subcommand.kind() == 'code':
+                            rewritten.append( Token(
+                                location = subcommand.location() ,
+                                kind     = 'code'                ,
+                                value    = nest_labels( options, uniques.get(), vv, subcommand.value() ) ,
+                            ))
+                        elif subcommand.kind() == 'subfn':
+                            rewritten.append(Token(
+                                location = subcommand.location()             ,
+                                kind     = 'subfn'                           ,
+                                value    = subFnRewrites[subcommand.value()] ,
+                            ))
+                        elif subcommand.kind() == 'FORWARDJUMPIF':
+                            rewritten.append( Token(
+                                location = subcommand.location() ,
+                                kind     = 'FORWARDJUMPIF'       ,
+                                value    = '.' + vv + '.' + str(forwardJumpOptInlineNo) + subcommand.value() ,
+                            ))
+                        elif subcommand.kind() == 'JUMPTARGET':
+                            rewritten.append( Token(
+                                location = subcommand.location() ,
+                                kind     = 'JUMPTARGET'          ,
+                                value    = '.' + vv + '.' + str(forwardJumpOptInlineNo) + subcommand.value(),
+                            ))
+                        else:
+                            rewritten.append( subcommand )
+                    
+                    if includeEndLabel:
+                        rewritten.append( Token(
+                            location = subcommand.location() ,
+                            kind     = 'JUMPTARGET'          ,
+                            value    = end                   ,
+                        ))
+        else:
+            rewritten.append( command )
+    
+    if changed:
+        return True, targetfn.rewriting_locals( newlocals ).rewriting_commands( rewritten ), list(newclosures.values())
+    else:
+        return False, targetfn, []
+
+def nest_labels( options, uniqueno, prefix, code ):
+    if '===' not in code:
+        return nest_labels_munge( uniqueno, prefix, code )
+    
+    sections = parse_code_sections( options.implementation, code )
+    
+    for section in sections:
+        if not (section['headers'].get('impl', options.implementation) == options.implementation):
+            continue
+        elif not (section['headers'].get('type','code') == 'code'):
+            continue
+        else:
+            section['body'] = nest_labels_munge( uniqueno, prefix, section['body'] )
+    
+    return unparse_code_sections( sections )
+    
+def nest_labels_munge( uniqueno, prefix, code ):
+    
+    isLocalLabel = re.compile( '(?P<before>.*)(?P<current>[.][A-Za-z_-]*)(?P<after>.*)' )
+    
+    rewritten = []
+    for line in code.split("\n"):
+        m = isLocalLabel.match( line )
+        if m:
+            rewritten.append(
+                m.group('before')
+                +
+                '.' + prefix
+                +
+                '.' + str(uniqueno)
+                + 
+                m.group('current')
+                + m.group('after')
+            )
+        else:
+            rewritten.append( line )
+    return '\n'.join(rewritten)
+
+# this optimization pass runs the programs encoded into assembly segments
+# that dictate various replacements optimizations that can be run to transform
+# the runtime assembly into compiletime token manipulations
+# 
+def optimize_perform_token_replacements( notes, recursive, opted, name, targetfn, uniques ):
+    
+    rewritten = []
+    changed = False
+    
+    for command in targetfn.body().commands():
+        if command.kind() != 'code':
+            rewritten.append( command )
+            continue
+        
+        if '===' not in command.value():
+            rewritten.append( command )
+            continue
+        
+        for section in parse_code_sections( IMPLEMENTATION, command.value() ):
+            if not (section['headers'].get('impl', IMPLEMENTATION) == IMPLEMENTATION):
+                if G_SHOW_OPTIMIZATIONS:
+                    debug( '[token-replacements] skipping section, wrong impl: %s' % repr( section ) )
+                continue
+            
+            if not (section['headers'].get('type','code') == 'token-replace'):
+                if G_SHOW_OPTIMIZATIONS:
+                    debug( '[token-replacements] skipping section, wrong type: %s' % repr( section ) )
+                continue
+            
+            when = section['headers'].get('when', None)
+            if when == None:
+                raise Exception( 'you cannot have a rewrite rule with no when' )
+            
+            constraints = [ e.strip() for e in when.split(',') ]
+            matches = True
+            for index, constraint in enumerate( reversed( constraints ) ):
+                if constraint == 'I':
+                    if index >= len( rewritten ):
+                        matches = False
+                        break
+                    elif rewritten[-index-1].kind() != 'integer':
+                        matches = False
+                        break
+                else:
+                    raise Exception( 'unknown when constraint: %s, in %s' % ( repr( constraint ), repr( command ) ) )
+            
+            if not matches:
+                continue
+            
+            changed = True
+            
+            relevant = rewritten[-len(constraints):None]
+            rewritten = rewritten[None:-len(constraints)]
+            
+            gs = globals().copy()
+            gs['self'] = command
+            todo = eval( section['body'], gs )
+            
+            new = todo( *relevant )
+            
+            if G_SHOW_OPTIMIZATIONS:
+                log( '[token-replacements] replaced %s with %s' % (
+                    (
+                        tuple(r.value() for r in relevant)
+                        +
+                        (
+                            (repr( command.location() ),)
+                            if not section['headers'].get('name',None) else
+                            (section['headers'].get('name'),)
+                        )
+                    ),
+                    tuple(n.value() for n in new),
+                ))
+            
+            for n in new:
+                rewritten.append( n )
+            
+            break
+            
+        else:
+            if G_SHOW_OPTIMIZATIONS:
+                debug( '[fetch-rewrite-rule] no matching rewrite rule for %s' % repr( command ) )
+            rewritten.append( command )
+    
+    if changed:
+        return True, targetfn.rewriting_commands( rewritten ), []
+    else:
+        return False, targetfn, []
+
+def optimize_propagate_localfn_constants( notes, recursive, opted, name, targetfn, uniques ):
+    
+    # we only propagate the locals here, we'll strip out unused sets in another step
+    
+    # rules:
+    #   if a set is performed after a constant
+    #   if we encounter a nonlocalsafe codeblock we have to forget the locals we are replacing
+    #   
+    #   until we reach another set
+    #   
+    
+    addressed = set()
+    replacements = {}
+    
+    rewritten = []
+    changed = False
+    for index, command in enumerate( targetfn.body().commands() ):
+        
+        if command.kind() == 'code':
+            if '===' in command.value():
+                sections = parse_code_sections( IMPLEMENTATION, command.value() )
+                for section in sections:
+                    if 'locals' in [ e.strip() for e in section['headers'].get('writes','').split(',') ]:
+                        # locals are not safe in this code!
+                        # kill our replacements cache
+                        if G_SHOW_OPTIMIZATIONS:
+                            debug('[propagate-localfn-constants] encountered code with "writes: locals", dropping replacements')
+                        replacements = {}
+                    else:
+                        # locals are safe in this code!
+                        # no need to drop replacements
+                        if G_SHOW_OPTIMIZATIONS:
+                            debug('[propagate-localfn-constants] assuming code without "writes: locals" doesn\'t' )
+            else:
+                # unstructured code can do anything
+                # drop all local references
+                if G_SHOW_OPTIMIZATIONS:
+                    debug('[propagate-localfn-constants] encountered unstructured code, dropping replacements')
+                replacements = {}
+            rewritten.append( command )
+            continue
+        
+        if command.kind() != 'localfn':
+            rewritten.append( command )
+            continue
+        
+        vv = command.value()
+        if vv.startswith('$.'):
+            rewritten.append( command )
+            continue
+        
+        if not rewritten:
+            rewritten.append( command )
+            continue
+        
+        name, fn = vv.split('.',1)
+        
+        if fn == 'set':
+            if rewritten[-1].kind() in ['integer', 'string']:
+                replacements[ name ] = rewritten[-1]
+            elif name in replacements:
+                del replacements[ name ]
+            rewritten.append( command )
+            continue
+        
+        if fn == 'get':
+            if name in replacements:
+                if G_SHOW_OPTIMIZATIONS:
+                    log('[propagate-localfn-constants] replacing %s with constant %s' % (
+                        repr( command ) ,
+                        repr( replacements[ name ] ) ,
+                    ))
+                changed = True
+                rewritten.append( replacements[ name ] )
+                continue
+            else:
+                rewritten.append( command )
+                continue
+        
+        if fn == 'here':
+            # we can do better than this
+            # we can check what subset of locals are used until the associated name is .addr, .get or .jump'd
+            # if we hit another <name>.here it's a new loop and we'd have to check that separately
+            # for now, though, we'll just conservatively assume 'loop starts == dead locals'
+            if G_SHOW_OPTIMIZATIONS:
+                log(
+                    '[propagate-localfn-constants] dropping all replacements on encountering potential loop start: %s' % (
+                        repr( command ),
+                    )
+                )
+            replacements = {}
+            rewritten.append( command )
+            continue
+        
+        if fn == 'addr':
+            if name in replacements:
+                del replacements[ name ]
+            addressed.add( name )
+            
+        if fn == 'incr':
+            if name in replacements:
+                if replacements[ name ].kind() == 'integer':
+                    if G_SHOW_OPTIMIZATIONS:
+                        log('[propagate-localfn-constants] incrementing constant local replacement: %s' % repr( command ) )
+                    replacements[ name ] = Token(
+                        location = replacements[ name ].location() ,
+                        kind     = 'integer' ,
+                        value    = replacements[ name ].value() + 1 ,
+                    )
+                    rewritten.append( command )
+                    continue
+                else:
+                    del replacements[ name ]
+                    rewritten.append( command )
+                    continue
+            else:
+                rewritten.append( command )
+                continue
+        
+        if fn == 'decr':
+            if name in replacements:
+                if replacements[ name ].kind() == 'integer':
+                    if G_SHOW_OPTIMIZATIONS:
+                        log('[propagate-localfn-constants] decrementing constant local replacement: %s' % repr( command ) )
+                    replacements[ name ] = Token(
+                        location = replacements[ name ].location() ,
+                        kind     = 'integer' ,
+                        value    = replacements[ name ].value() - 1 ,
+                    )
+                    rewritten.append( command )
+                    continue
+                else:
+                    del replacements[ name ]
+                    rewritten.append( command )
+                    continue
+            else:
+                rewritten.append( command )
+                continue
+        
+        if fn == 'jump':
+            rewritten.append( command )
+            continue
+        
+        if fn == 'jumpIf':
+            rewritten.append( command )
+            continue
+        
+        if fn == 'update':
+            if rewritten and rewritten[-1].kind() == 'fnref':
+                fnref = rewritten[-1]
+                rewritten = rewritten[:-1]
+                rewritten.append( Token(
+                    location = command.location() ,
+                    kind     = 'localfn',
+                    value    = name + '.get',
+                ))
+                rewritten.append( fnref )
+                rewritten.append( Token(
+                    location = comamnd.location() ,
+                    kind = 'localfn',
+                    value = '$.call',
+                ))
+                rewritten.append( Token(
+                    location = command.location() ,
+                    kind     = 'localfn' ,
+                    value    = name + 'set',
+                ))
+            else:
+                rewritten.append( command )
+                continue
+        
+        if fn == 'call':
+            rewritten.append( command )
+            continue
+        
+        if fn == 'copy':
+            rewritten.append( command )
+            continue
+        
+        raise Exception( '[propagate-localfn-constants] unknown localfn: %s' % repr( command ) )
+    
+    if changed:
+        return True, targetfn.rewriting_commands( rewritten ), []
+    else:
+        return False, targetfn, []
+
+#####
+
+class AsmFunction:
+    
+    def __init__(
+        self     ,
+        location ,
+        name     ,
+    ):
+        self._location = location
+        self._name     = name
+        self._chunks   = []
+        return
+    
+    def add_code( self, code ):
+        self._chunks.append( code )
+

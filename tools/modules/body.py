@@ -98,6 +98,12 @@ class Body:
         self._localvars = localvars
         self._subfns    = subfns
     
+    def location(self):  return self._location
+    def commands(self):  return self._commands
+    def localargs(self): return self._localargs
+    def localvars(self): return self._localvars
+    def subfns(self):    return self._subfns
+    
     def body_details( self, name ):
         return BodyDetails(
             name      = name            ,
@@ -150,7 +156,7 @@ class BodyDetails:
                         yield name
             
             if command.kind() == 'subfn':
-                for unresolvedNonLocal in functions[ command.value() ].body().unresolved_nonlocals( functions ):
+                for unresolvedNonLocal in functions[ command.value() ].body_details().unresolved_nonlocals( functions ):
                     if not self.has_local(unresolvedNonLocal):
                         yield unresolvedNonLocal
     

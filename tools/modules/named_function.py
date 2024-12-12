@@ -48,8 +48,11 @@ class NamedFunction:
         return 'function'
     
     def location ( self ): return self._location
-    def body     ( self ): return self._body.body_details(self._name.value())
+    def body     ( self ): return self._body
     def parent   ( self ): return None
+    
+    def body_details( self ):
+        return self._body.body_details(self._name.value())
     
     def name( self ):
         return Token(

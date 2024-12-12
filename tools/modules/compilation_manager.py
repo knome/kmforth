@@ -14,12 +14,10 @@ class CompilationManager:
         options   ,
         context   ,
         parser    ,
-        optimizer ,
     ):
         self._options   = options
         self._context   = context
         self._parser    = parser
-        self._optimizer = optimizer
     
     def compile_program(
         self       ,
@@ -87,7 +85,7 @@ class CompilationManager:
                                 allNames.add( fn.name().value() )
                                 allFns[ fn.name().value() ] = fn
                                 
-                                for subfn in fn.body().subfns():
+                                for subfn in fn.body_details().subfns():
                                     fns.append( subfn )
                     
                     elif definition.definition_type() == 'include':
@@ -131,19 +129,12 @@ class CompilationManager:
                 else:
                     allNames.add( fn.name().value() )
                     allFns[ fn.name().value() ] = fn
-                    for subfn in fn.body().subfns():
+                    for subfn in fn.body_details().subfns():
                         fns.append( subfn )
         
         callgraph, usedFns = self.analyze_functions( allFns, startname = self._options.startname )
         
-        if self._options.optimize:
-            outFns = self._optimizer.optimize( allFns, usedFns, callgraph, self._options.startname, uniques )
-            # drop functions we optimized out
-            callgraph, usedFns = self.analyze_functions( outFns, startname = self._options.startname )
-        else:
-            outFns = allFns
-        
-        return outFns, usedFns
+        return allFns, usedFns
 
     # ensures all required functions are defined
     # returns list of all actually used functions
@@ -164,7 +155,7 @@ class CompilationManager:
         for fn, dd in allFns.items():
             if fn not in callgraph:
                 callgraph[ fn ] = set()
-            for cc in dd.body().commands():
+            for cc in dd.body_details().commands():
                 if cc.kind() == 'word':
                     if (cc.value()) not in allFns:
                         raise Exception( 'unknown function called at %s in %s: %s' % (
@@ -181,10 +172,6 @@ class CompilationManager:
                 elif cc.kind() == 'integer':
                     pass
                 elif cc.kind() == 'localfn':
-                    pass
-                elif cc.kind() == 'FORWARDJUMPIF':
-                    pass
-                elif cc.kind() == 'JUMPTARGET':
                     pass
                 elif cc.kind() == 'fnref':
                     if cc.value() not in allFns:

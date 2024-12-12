@@ -74,9 +74,12 @@ class LambdaFunction:
     def kind( self ): return 'lambda'
     
     def location ( self ): return self._location
-    def body     ( self ): return self._body.body_details(self._lambdaName)
+    def body     ( self ): return self._body
     def parent   ( self ): return self._parent
         
+    def body_details( self ):
+        return self._body.body_details(self._lambdaName)
+    
     def is_closure( self, functions ):
         return self._body.body_details(self._lambdaName).is_closure( functions )
     

@@ -86,7 +86,7 @@ def generate_code(
             trampolineEndOffset = trampolineEndOffset ,
         )
         
-        frameOffsets = functions[ fn ].body().frame_offsets(
+        frameOffsets = functions[ fn ].body_details().frame_offsets(
             functions           = functions           ,
             trampolineSize      = trampolineSize      ,
             trampolineEndOffset = trampolineEndOffset ,
@@ -123,7 +123,7 @@ def generate_code(
                 closureName
             ))
         
-        for command in functions[ fn ].body().commands():
+        for command in functions[ fn ].body_details().commands():
             
             if command.kind() == 'word':
                 rt = '.' + fn + '_' + str( nn )
@@ -280,13 +280,13 @@ class LocalFns:
         self._trampolineSize      = trampolineSize
         self._trampolineEndOffset = trampolineEndOffset
         
-        self._frameOffsets = functions[ fn ].body().frame_offsets(
+        self._frameOffsets = functions[ fn ].body_details().frame_offsets(
             functions           = functions           ,
             trampolineSize      = trampolineSize      ,
             trampolineEndOffset = trampolineEndOffset ,
         )
         
-        self._body = functions[ fn ].body()
+        self._body = functions[ fn ].body_details()
         return
     
     def localvar( self, localVarName ):
@@ -396,7 +396,7 @@ class LocalVarFns:
         indirections = []
         cfn = self._fn
         while True:
-            frameOffsets = self._functions[ cfn ].body().frame_offsets(
+            frameOffsets = self._functions[ cfn ].body_details().frame_offsets(
                 functions           = self._functions     ,
                 trampolineSize      = trampolineSize      ,
                 trampolineEndOffset = trampolineEndOffset ,
@@ -430,7 +430,7 @@ class LocalVarFns:
         last = remaining.pop()
         penultimate = self._fn
         for cfn in remaining:
-            parentFrameOffsets = self._functions[ cfn ].body().frame_offsets(
+            parentFrameOffsets = self._functions[ cfn ].body_details().frame_offsets(
                 functions           = self._functions           ,
                 trampolineSize      = self._trampolineSize      ,
                 trampolineEndOffset = self._trampolineEndOffset ,
@@ -444,7 +444,7 @@ class LocalVarFns:
                 - 1,
             ))
             penultimate = cfn
-        lastFrameOffsets = self._functions[ last ].body().frame_offsets(
+        lastFrameOffsets = self._functions[ last ].body_details().frame_offsets(
             functions           = self._functions           ,
             trampolineSize      = self._trampolineSize      ,
             trampolineEndOffset = self._trampolineEndOffset ,

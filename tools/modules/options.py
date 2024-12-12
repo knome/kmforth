@@ -19,6 +19,12 @@ def parse_options(
     parser = optparse.OptionParser()
     
     parser.add_option(
+        '--generate'    ,
+        dest='generate' ,
+        default='code'  ,
+    )
+    
+    parser.add_option(
         '--library-path'    ,
         dest='libraryPath'  ,
         default='./library' ,
@@ -102,6 +108,7 @@ def parse_options(
         libraryPath         = options.libraryPath         ,
         targetPath          = free[0]                     ,
         startname           = startname                   ,
+        generate            = options.generate            ,
         # architecture options
         implementation      = defaultImplementation       ,
         trampolineSize      = options.trampolineSize      ,

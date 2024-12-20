@@ -20,31 +20,27 @@
 :type/u8.size 1             ;
 :type/u8.set  memory/poke-b ;
 :type/u8.get  memory/peek-b ;
-
-# u8-addr cursor
-:type/u8.repr
-  { $cursor }
-  [
-    dup strings/length swap $cursor.get ~cursor/write
-  ]
-  strings/with-unsigned-as-string
-;
+:type/u8.with-repr strings/with-unsigned-as-string ;
 
 :type/u16.size 2             ;
 :type/u16.set  memory/poke-w ;
 :type/u16.get  memory/peek-w ;
+:type/u16.with-repr strings/with-unsigned-as-string ;
 
 :type/u32.size 4 ;
 :type/u32.set  memory/poke-d ;
 :type/u32.get  memory/peek-d ;
+:type/u32.with-repr strings/with-unsigned-as-string ;
 
 :type/u64.size 8 ;
 :type/u64.set  memory/poke-q ;
 :type/u64.get  memory/peek-q ;
+:type/u64.with-repr strings/with-unsigned-as-string ;
 
 :type/pointer.size type/u64.size ;
 :type/pointer.set  type/u64.set  ;
 :type/pointer.get  type/u64.get  ;
+:type/pointer.with-repr strings/with-unsigned-as-string ;
 
 # user defines a macro of form % name (@rc @st) @ @rc @st ( (field type) (field type) (field type count) ...etc... )
 # they then call @ struct/define name ; # (rc=recursive-call st=state)
@@ -71,12 +67,12 @@
                   (@fc.count)
                   @(
                       ((@fc 2) @f)
-                      (@e.ifEqual (@fn @ft))
+                      (@e.isEqual.if (@fn @ft))
                       (@fn @ft 0 1)
                   )
                   @(
                       ((@fc 3) @f)
-                      (@e.ifEqual (@fn @ft @fr))
+                      (@e.isEqual.if (@fn @ft @fr))
                       (@fn @ft 1 @fr)
                   )
               )
@@ -91,6 +87,116 @@
   # struct-level functions
   
   : @name.size 0 @( (@fields) (@f.each) @( (@f) ((@fn @ft @fa @fr)) @ft.size @fr * + ) ) ;
+  
+  # a big wad of overcomplex macro expansion for printing out the current value of some structure
+  : @name.print { $structure }
+      @(
+          (
+              # grab the name of the structure so we can stringize it
+              @name
+              
+              # grab the list of fields so we can capture a count
+              @fields
+          )
+          
+          (
+              # expand the name into a string
+              @n.string
+              
+              # capture the field count
+              @fc.count
+          )
+          
+          # print the name of the structure and the opening bracket
+          @n print
+          "{" print
+          
+          @(
+              (
+                  # drop the count and 0 into a macrolist for comparison
+                  # allowing us to branch based on whether there are fields or no
+                  (@fc 0)
+              )
+              
+              (
+                  # only expand this macro if there are 0 fields
+                  @e.isEqual.if
+              )
+                  
+              "  (no fields)" print
+          )
+          
+          @(
+              (
+                  # drop the count and 0 into a macrolist for comparison
+                  # allowing us to branch based on whether there are fields or no
+                  (@fc 0)
+              )
+              
+              (
+                  # this time expand if there are fields
+                  @ne.isEqual.not.if
+              )
+              
+              @(
+                  (
+                      # pass the fields so we can expand out the longest field name
+                      @fields
+                      
+                      # pass it again so we can iterate over each contained field
+                      @fields
+                  )
+                  
+                  (
+                      # calculate max field-name length
+                      @maxFieldNameLength.each.first.string.length.collect.sort.reverse.first
+                      
+                      # iterate over the contained fields
+                      # these have already been expanded in the struct/-define to (name type isArray numEntries)
+                      @field.each
+                  )
+                  
+                  @(
+                      (@field @field @field)
+                      (
+                          @fieldName.first
+                          @fieldNameString.first.string
+                          @fieldType.rest.first.string
+                      )
+                      
+                      @fieldNameString
+                      @maxFieldNameLength
+                      [ { $padded }
+                      
+                        # print the value of scalars
+                        @(
+                            (@field)
+                            (@ifFieldIsScalar.rest.rest.first.not.if)
+                            
+                            $structure.get
+                            [ { $value }
+                              "  " $padded.get " (" @fieldType ") = " $value.get 6 print-strings
+                            ]
+                            @name//@fieldName.with-repr
+                        )
+                        
+                        # just print out that a value is an array
+                        @(
+                            (@field)
+                            (@ifFieldIsScalar.rest.rest.first.if)
+                            
+                            "  " $padded.get " )" @fieldType ") = (is-array)" 5 print-strings
+                        )
+                        
+                      ]
+                      strings/with-right-padded-to-length
+                  )
+              )
+          )
+          
+          "}" print
+      )
+  ;
 ;
 
 % struct/-define-field-accessors ( @name @before (@fieldName @fieldType @fieldIsArray @fieldRepetitions) @after )
@@ -105,10 +211,11 @@
   : @name//@fieldName.addr
     0 @( (@before) (@b.each) @( (@b) ((@fn @ft @fa @fr)) @ft.size @fr * + ) ) +
   ;
-;  
-
-% struct/-define-array-accessors (@name @before @fieldName @fieldType @fieldIsArray.expandIf @fieldRepetitions @after)
   
+;
+
+% struct/-define-array-accessors (@name @before @fieldName @fieldType @fieldIsArray.if @fieldRepetitions @after)
+
   # [:
   # [: <number-of-entries>
   # 
@@ -148,7 +255,16 @@
   ;
 ;
 
-% struct/-define-scalar-accessors (@name @before @fieldName @fieldType @fieldIsArray.expandIfNot @fieldRepetitions @after)
+% struct/-define-scalar-accessors (@name @before @fieldName @fieldType @fieldIsArray.not.if @fieldRepetitions @after)
+  
+  # [: structure todo
+  # [: <calls todo with string representing value of fieldName on stack>
+  : @name//@fieldName.with-repr
+    { $structure $todo }
+    $structure.get @name//@fieldName.get
+    $todo.get
+    @fieldType.with-repr
+  ;
   
   # [: 
   # [: size
@@ -213,7 +329,7 @@
 #   @ hello (some state) (1 2 3 4) 5 ()
 # 
 % struct/-with-mapping-window (@todo @state @list)
-  @ struct/-with-mapping-window/ready @todo @state () @list ;
+  @ struct/-with-mapping-window/ready @todo @state () @list @list ;
 ;
 
 # % with-mapping-window/ready (hello state (a b c) (d e f))
@@ -221,12 +337,12 @@
 #   @ struct/-with-mapping-window/ready hello state (a b c d) (e f)
 # ;
 # 
-% struct/-with-mapping-window/ready (@todo @state @prev @remaining.ifNotEmpty)
+% struct/-with-mapping-window/ready (@todo @state @prev @shouldExpand.isEmpty.not.if @remaining)
   @ @todo @state @prev @( (@remaining) (@rf.first) @rf) @( (@remaining) (@rr.rest) @rr ) ;
   @ struct/-with-mapping-window/ready
     @todo
     @state
     ( @( (@prev) (@p.each) @p ) @( (@remaining) (@rf.first) @rf ) ) 
-    @( (@remaining) (@rr.rest) @rr )
+    @( (@remaining) (@rr.rest) @rr @rr )
   ;
 ;

@@ -9,8 +9,10 @@ class ExpansionRuleGlobalNo:
     def __init__(
         self     ,
         location ,
+        context  ,
     ):
         self._location = location
+        self._context  = context
     
     def variations( self ):
         nn = self.NN[0]

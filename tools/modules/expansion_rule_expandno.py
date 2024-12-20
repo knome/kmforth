@@ -14,8 +14,10 @@ class ExpansionRuleExpandNo:
     def __init__(
         self     ,
         location ,
+        context  ,
     ):
         self._location = location
+        self._context  = context
         self._nn       = 0
     
     def variations( self ):

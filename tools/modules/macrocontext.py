@@ -3,6 +3,7 @@ import re
 
 import modules.constants as constants
 from modules.token import Token
+from modules.macro_list import MacroList
 
 class MacroContext:
     def __init__(

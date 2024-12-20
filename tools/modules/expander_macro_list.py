@@ -27,9 +27,10 @@ class ExpanderMacroList:
             return
         
         if len( bits ) != len( self._parameterList ):
-            raise Exception( 'expected macrolist to have %s entries: %s' % (
-                len( self._parameterList ) ,
-                repr( value )              ,
+            raise Exception( 'expected macrolist to have %s entries (for %s): %s' % (
+                len( self._parameterList )  ,
+                repr( self._parameterList ) ,
+                repr( value )               ,
             ))
         
         mapping = []

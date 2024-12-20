@@ -53,6 +53,7 @@
   stack/with-stack-buffer
 ;
 
+# length of string NOT including \0
 :strings/length
   `
   sub r14, 8             ; pop the pointer to the string
@@ -81,6 +82,8 @@
 # 
 :strings/with-strings-as-string
   { $n $todo -- $total }
+  0 $total.set
+  
   $n.get [ nth strings/length [+] $total.update ] for-range
   $total.incr
   $total.get
@@ -133,6 +136,7 @@
   (lf     10) (line-feed 10) (nl 10) (newline 10)
   (cr     13) (carriage-return 13)
   (esc    27) (escape 27)
+  (space  32)
   (dot    46) (period 46) (. 46)
   (A      64)
   (Z      90)
@@ -198,4 +202,42 @@
     loop
   ]
   stack/with-escape
+;
+
+# call with string right-padded with spaces to given size
+:strings/with-right-padded-to-length
+  { $s $minlength $todo -- $slen $padsize }
+  
+  $s.get strings/length $slen.copy $minlength.get is-smaller-than
+  [ 
+     # if length is smaller than minsize, grab a minsize buffer (+nul)
+     # on the stack, copy in the string, pad it, and then call todo
+     
+     $minlength.get $slen.get - $padsize.set
+     
+     $minlength.get incr # (space for \0)
+     [
+        { $b }
+        $s.get $b.get strings/strcpy
+        $b.get $slen.get + # points to \n of copied string
+        
+        $padsize.get
+        [
+          dup strings/ascii-space swap memory/poke-b
+          incr
+        ]
+        repeat
+        
+        strings/ascii-nul swap memory/poke-b # nul terminate the new string
+        
+        # call the todo with the padded string
+        $b.get $todo.call
+     ]
+     stack/with-stack-buffer
+  ]
+  [
+     # string is already at or past minlength, just call todo with it
+     $s.get $todo.call
+  ]
+  if
 ;

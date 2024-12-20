@@ -3,8 +3,10 @@ from modules.variations import Variations
 
 class ExpanderScalar:
     def __init__(
-        self ,
+        self    ,
+        context ,
     ):
+        self._context        = context
         self._expansionRules = []
         return
     
@@ -25,8 +27,9 @@ class ExpanderScalar:
         source = Variations( value )
         for rule, location in self._expansionRules:
             source = rule(
-                location = location ,
-                source   = source   ,
+                location = location      ,
+                source   = source        ,
+                context  = self._context ,
             )
         
         for variation in source.variations():
@@ -37,11 +40,15 @@ class ExpanderScalar:
             raise Exception( 'nonconsuming variations should not be called for an argument consuming parameter' )
         else:
             rule, location = self._expansionRules[0]
-            source = rule( location = location )
+            source = rule(
+                location = location       ,
+                context  = self._context  ,
+            )
             for rule, location in self._expansionRules[1:]:
                 source = rule(
-                    location = location ,
-                    source   = source   ,
+                    location = location      ,
+                    source   = source        ,
+                    context  = self._context ,
                 )
             
             for variation in source.variations():

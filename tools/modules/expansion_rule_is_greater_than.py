@@ -1,5 +1,7 @@
 
-class ExpansionRuleIfGreaterThan:
+from modules.token import Token
+
+class ExpansionRuleIsGreaterThan:
     @staticmethod
     def consumes_argument():
         return True
@@ -8,9 +10,11 @@ class ExpansionRuleIfGreaterThan:
         self     ,
         location ,
         source   ,
+        context  ,
     ):
         self._location = location
         self._source   = source
+        self._context  = context
         
     def variations(
         self ,
@@ -18,13 +22,13 @@ class ExpansionRuleIfGreaterThan:
         for value in self._source.variations():
             
             if value.kind() != 'macrolist':
-                raise Exception( '.ifGreaterThan expected a macrolist, found %s' % repr( value ) )
+                raise Exception( '.isGreaterThan expected a macrolist, found %s' % repr( value ) )
             
             last = None
             isGreater = True
             for bit in value.bits():
                 if bit.kind() != 'integer':
-                    raise Exception( '.ifGreaterThan expected macrolist to contain integers, found %s' % repr( bit ) )
+                    raise Exception( '.isGreaterThan expected macrolist to contain integers, found %s' % repr( bit ) )
                 elif last == None:
                     last = bit
                 else:
@@ -32,5 +36,8 @@ class ExpansionRuleIfGreaterThan:
                         isGreater = False
                         break
             
-            if isGreater:
-                yield value
+            yield Token(
+                location = self._location        ,
+                kind     = 'integer'             ,
+                value    = 1 if isGreater else 0 ,
+            )

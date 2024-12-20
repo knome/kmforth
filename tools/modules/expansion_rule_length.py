@@ -1,7 +1,7 @@
 
 from modules.token import Token
 
-class ExpansionRuleCount:
+class ExpansionRuleLength:
     @staticmethod
     def consumes_argument():
         return True
@@ -16,15 +16,15 @@ class ExpansionRuleCount:
         self._source   = source
         self._context  = context
         return
-    
+        
     def variations(
         self ,
     ):
         for value in self._source.variations():
-            if value.kind() != 'macrolist':
-                raise Exception( '.count expected macrolist, found %s' % repr( value ) )
+            if value.kind() != 'string':
+                raise Exception( '.length expected string, found %s' % repr( value ) )
             
-            cc = len( list( value.bits() ) )
+            cc = len( value.value() )
             
             yield Token(
                 location = self._location ,

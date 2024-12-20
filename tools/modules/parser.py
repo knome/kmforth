@@ -18,13 +18,17 @@ from modules.expansion_rule_to_zero         import ExpansionRuleToZero
 from modules.expansion_rule_to_one          import ExpansionRuleToOne
 from modules.expansion_rule_decr            import ExpansionRuleDecr
 from modules.expansion_rule_incr            import ExpansionRuleIncr
-from modules.expansion_rule_expand_if       import ExpansionRuleExpandIf
-from modules.expansion_rule_expand_if_not   import ExpansionRuleExpandIfNot
-from modules.expansion_rule_if_not_empty    import ExpansionRuleIfNotEmpty
-from modules.expansion_rule_if_equal        import ExpansionRuleIfEqual
-from modules.expansion_rule_if_less_than    import ExpansionRuleIfLessThan
-from modules.expansion_rule_if_greater_than import ExpansionRuleIfGreaterThan
+from modules.expansion_rule_if              import ExpansionRuleIf
+from modules.expansion_rule_not             import ExpansionRuleNot
+from modules.expansion_rule_is_empty        import ExpansionRuleIsEmpty
+from modules.expansion_rule_is_equal        import ExpansionRuleIsEqual
+from modules.expansion_rule_is_less_than    import ExpansionRuleIsLessThan
+from modules.expansion_rule_is_greater_than import ExpansionRuleIsGreaterThan
 from modules.expansion_rule_collect         import ExpansionRuleCollect
+from modules.expansion_rule_length          import ExpansionRuleLength
+from modules.expansion_rule_sort            import ExpansionRuleSort
+from modules.expansion_rule_reverse         import ExpansionRuleReverse
+from modules.expansion_rule_string          import ExpansionRuleString
 from modules.expansion_rule_expandno        import ExpansionRuleExpandNo
 from modules.expansion_rule_globalno        import ExpansionRuleGlobalNo
 from modules.unexpanded_macro_expansion     import UnexpandedMacroExpansion
@@ -264,9 +268,9 @@ class Parser:
                 tokens.take()
                 commands.append( pt )
                 
-            elif pt.kind() == '(':
+            elif pt.kind() in ['(', 'macrolist']:
                 raise Exception( 'macrolist outside of macro-parameters or arguments: %s' % repr( pt ) )
-                
+            
             else:
                 raise Exception( 'what is %s' % repr( pt ) )
         
@@ -514,7 +518,9 @@ class Parser:
         
         bits = name.value().split(".")
         
-        expander = ExpanderScalar()
+        expander = ExpanderScalar(
+            context = self._context,
+        )
         
         parameter = MacroParameter(
             initial  = name                          ,
@@ -531,13 +537,17 @@ class Parser:
             'toOne'         : ExpansionRuleToOne         ,
             'decr'          : ExpansionRuleDecr          ,
             'incr'          : ExpansionRuleIncr          ,
-            'expandIf'      : ExpansionRuleExpandIf      ,
-            'expandIfNot'   : ExpansionRuleExpandIfNot   ,
-            'ifNotEmpty'    : ExpansionRuleIfNotEmpty    ,
-            'ifEqual'       : ExpansionRuleIfEqual       ,
-            'ifLessThan'    : ExpansionRuleIfLessThan    ,
-            'ifGreaterThan' : ExpansionRuleIfGreaterThan ,
+            'if'            : ExpansionRuleIf            ,
+            'not'           : ExpansionRuleNot           ,
+            'isEmpty'       : ExpansionRuleIsEmpty       ,
+            'isEqual'       : ExpansionRuleIsEqual       ,
+            'isLessThan'    : ExpansionRuleIsLessThan    ,
+            'isGreaterThan' : ExpansionRuleIsGreaterThan ,
             'collect'       : ExpansionRuleCollect       ,
+            'length'        : ExpansionRuleLength        ,
+            'sort'          : ExpansionRuleSort          ,
+            'reverse'       : ExpansionRuleReverse       ,
+            'string'        : ExpansionRuleString        ,
             
             'expandno'      : ExpansionRuleExpandNo      ,
             'globalno'      : ExpansionRuleGlobalNo      ,
@@ -822,8 +832,7 @@ class Parser:
                 yield macroContext.expand_macrovar( bit )
             elif bit.kind() == '@':
                 if self._options.showExpansions:
-                    EXPANSIONID = G_EXPANSION_ID[0]
-                    G_EXPANSION_ID[0] += 1
+                    EXPANSIONID = self._context.next_expansion_id()
                     EXPANDED = []
                 else:
                     EXPANSIONID = 'NOT-EXPANDING'
@@ -837,7 +846,7 @@ class Parser:
                         EXPANDED.append( bit )
                     yield bit
                 if self._options.showExpansions:
-                    log( 'EXPANDED-LOCAL', 'XID=', EXPANSIONID, 'TO', repr(' '.join([ E.simple() for E in EXPANDED ])) )
+                    self._context.log( 'EXPANDED-LOCAL', 'XID=', EXPANSIONID, 'TO', repr(' '.join([ E.simple() for E in EXPANDED ])) )
             elif bit.kind() == 'macrostring':
                 yield self.expand_macrostring(
                     macroContext = macroContext ,
@@ -884,7 +893,7 @@ class Parser:
         uniques        ,
     ):
         if self._options.showExpansions:
-            log( 'EXPANDING-NAMED', macroExpansion.simple() )
+            self._context.log( 'EXPANDING-NAMED', macroExpansion.simple() )
         
         if not macroContext.has_macro( macroExpansion.macro_name().value() ):
             raise Exception( 'unknown macro definition: %s' % macroExpansion.macro_name() )
@@ -922,7 +931,7 @@ class Parser:
                     )
                     expandedFunctions.append( expandedFunction )
                     if self._options.showExpansions:
-                        log( 'EXPANDED-FUNCTION', expandedFunction.simple() )
+                        self._context.log( 'EXPANDED-FUNCTION', expandedFunction.simple() )
                     
                 elif unexpandedDefinition.initial().kind() == '@': # or macrovar?
                     
@@ -1004,16 +1013,18 @@ class Parser:
         _left   = None ,
     ):
         _left = _left or ()
+        self._context.log('LEFT=%s' % repr(_left))
         if sources:
             source, remaining = sources[0], sources[1:]
+            self._context.log('CHAINING %s TO %s' % (repr(source), repr(remaining)))
             for vv in source.variations():
                 if remaining:
                     for group in self.chain_argument_sources( remaining, _left + tuple( source.namer().names( vv ) ) ):
                         yield group
                 else:
                     chained = _left + tuple( source.namer().names( vv ) )
-                    # if G_SHOW_EXPANSIONS:
-                    #     log( 'CHAINED', chained )
+                    if self._options.showExpansions:
+                        self._context.log( 'CHAINED', chained )
                     yield chained
         else:
             yield _left
@@ -1054,7 +1065,7 @@ class Parser:
             ))
             
             if self._options.showExpansions:
-                log(
+                self._context.log(
                     'EXPANDING-LOCAL', 'XID=', expansionId ,
                     'arguments='     , repr(' '.join([ A.simple() for A in arguments  ])) ,
                     'parameters='    , repr(' '.join([ P.simple() for P in parameters ])) ,

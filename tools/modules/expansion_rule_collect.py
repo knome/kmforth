@@ -1,4 +1,6 @@
 
+from modules.macro_list import MacroList
+
 # gathers all variations of its source into a macrolist
 class ExpansionRuleCollect:
     @staticmethod
@@ -9,9 +11,11 @@ class ExpansionRuleCollect:
         self     ,
         location ,
         source   ,
+        context  ,
     ):
         self._location = location
         self._source   = source
+        self._context  = context
         return
     
     def variations(

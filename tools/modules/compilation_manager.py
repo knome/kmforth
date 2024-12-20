@@ -7,6 +7,8 @@ from modules.uniques      import Uniques
 from modules.scanner      import Scanner
 from modules.source       import Source
 
+from modules.mangling import unmangle
+
 class CompilationManager:
     
     def __init__(

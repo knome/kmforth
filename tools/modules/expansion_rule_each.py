@@ -8,9 +8,11 @@ class ExpansionRuleEach:
         self     ,
         location ,
         source   ,
+        context  ,
     ):
         self._location = location
         self._source   = source
+        self._context  = context
         
     def variations( self ):
         for value in self._source.variations():

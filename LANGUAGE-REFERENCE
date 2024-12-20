@@ -181,7 +181,6 @@
 # * decr          : expand once with one less than the argument
 # * incr          : expand once with one more than the argument
 # * expandIf      : only expand if the value is truthy (not 0, "", or ())
-# * expandIfNot   : only expand if the value is falsy  (is 0, "", or ())
 # * ifNotEmpty    : only expand if the macrolist isnt empty
 # * equal         : only expand of all values in the macrolist are equal
 # * ifLessThan    : only expand if the macrolist is ordered least to greatest and also is never equal

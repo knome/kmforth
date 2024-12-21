@@ -1,0 +1,120 @@
+
+# shorthand syntax for defining enums, values, and a with-repr functions for them
+# 
+# @ enums/define-u64 enum-name (
+#   (name      value)
+#   (other     value)
+#   (different value)
+# );
+# 
+# basic helpers to get the numeric and string values of an enum entry
+# enum-name//name.value
+# enum-name//name.string
+# 
+# determine if a given value is a valid entry of the enum
+# enum-name.is-valid
+# 
+# determine if a given or'd value is constructed only a valid enum values
+# (less sure I'll actually need this one, I'll leave it for later, if ever)
+# enum-name.is-valid-set
+# 
+# these allow the enum to be used as a type in a struct
+# enum-name.size
+# enum-name.get
+# enum-name.set
+# enum-name.with-repr
+
+% enums/define-u8  (@typename @enums) @ enums/-define @typename type/u8  @enums ; ;
+% enums/define-u16 (@typename @enums) @ enums/-define @typename type/u16 @enums ; ;
+% enums/define-u32 (@typename @enums) @ enums/-define @typename type/u32 @enums ; ;
+% enums/define-u64 (@typename @enums) @ enums/-define @typename type/u64 @enums ; ;
+
+% enums/-define (@typename @basetype @enums)
+  @ enums/-define-per @typename @basetype @enums ;
+  @ enums/-define-struct-type-accessors @typename @basetype @enums ;
+  @ enums/-define-is-valid @typename @basetype @enums ;
+#   @ enums/-define-is-valid-set @typename @basetype @enums ;
+;
+
+% enums/-define-per (@typename @basetype @e.each)
+  @ enums/-define-dot-value @typename @basetype @e @e ;
+  @ enums/-define-dot-string @typename @e @e ;
+;
+
+% enums/-define-dot-value (@typename @basetype @en.first @ev.rest.first)
+  : @typename//@en.value @ev ;
+;
+
+% enums/-define-dot-string (@typename @en.first @ens.first.string)
+  : @typename//@en.string @ens ;
+;
+
+% enums/-define-struct-type-accessors (@typename @basetype @enums)
+  : @typename.size @basetype.size ;
+  : @typename.get  @basetype.get  ;
+  : @typename.set  @basetype.set  ;
+  
+  : @typename.with-repr { $value $todo }
+    0
+    @(
+      (@enums)
+      (@e.each)
+      
+      @(
+        (@e)
+        ((@name @value))
+        
+        $value.get @value and
+        [
+          dup
+          [
+            "|" swap incr
+          ]
+          when
+          "@name@" swap incr
+        ]
+        when
+      )
+    )
+    
+    dup
+    [
+      $todo.get strings/with-strings-as-string
+    ]
+    [
+      pop
+      $value.get
+      [ { $v }
+        "@typename@//unknown[" $v.get "]" 3 $todo.get strings/with-strings-as-string
+      ]
+      strings/with-unsigned-as-string
+    ]
+    if
+  ;
+;
+
+% enums/-define-is-valid (@typename @basetype @enums)
+  # [: v
+  # [: <is v valid 1||0>
+  : @typename.is-valid 
+    [ { $escape }
+      @(
+        (@enums)
+        (@e.each)
+        
+        @(
+          (@e)
+          ((@name @value))
+          
+          dup @value ==
+          [
+            pop 1 $escape.call
+          ]
+          when
+        )
+      )
+      pop 0
+    ]
+    stack/with-escape
+  ;
+;

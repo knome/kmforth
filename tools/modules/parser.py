@@ -1013,10 +1013,12 @@ class Parser:
         _left   = None ,
     ):
         _left = _left or ()
-        self._context.log('LEFT=%s' % repr(_left))
+        if self._options.showExpansions:
+            self._context.log('LEFT=%s' % repr(_left))
         if sources:
             source, remaining = sources[0], sources[1:]
-            self._context.log('CHAINING %s TO %s' % (repr(source), repr(remaining)))
+            if self._options.showExpansions:
+                self._context.log('CHAINING %s TO %s' % (repr(source), repr(remaining)))
             for vv in source.variations():
                 if remaining:
                     for group in self.chain_argument_sources( remaining, _left + tuple( source.namer().names( vv ) ) ):

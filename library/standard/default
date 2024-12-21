@@ -13,6 +13,7 @@
 @ "./networking" ;
 @ "./time" ;
 @ "./conv" ;
+@ "./enums" ;
 
 @ "./cursor" ;
 @ "./string-cursor" ;

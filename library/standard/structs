@@ -143,6 +143,9 @@
                       # pass the fields so we can expand out the longest field name
                       @fields
                       
+                      # pass it again so we can expand out the longest type-name
+                      @fields
+                      
                       # pass it again so we can iterate over each contained field
                       @fields
                   )
@@ -150,6 +153,9 @@
                   (
                       # calculate max field-name length
                       @maxFieldNameLength.each.first.string.length.collect.sort.reverse.first
+                      
+                      # calculate max type-name length
+                      @maxFieldTypeNameLength.each.rest.first.string.length.collect.sort.reverse.first
                       
                       # iterate over the contained fields
                       # these have already been expanded in the struct/-define to (name type isArray numEntries)
@@ -166,28 +172,34 @@
                       
                       @fieldNameString
                       @maxFieldNameLength
-                      [ { $padded }
+                      [ { $paddedFieldName }
                       
-                        # print the value of scalars
-                        @(
-                            (@field)
-                            (@ifFieldIsScalar.rest.rest.first.not.if)
-                            
-                            $structure.get
-                            [ { $value }
-                              "  " $padded.get " (" @fieldType ") = " $value.get 6 print-strings
-                            ]
-                            @name//@fieldName.with-repr
-                        )
-                        
-                        # just print out that a value is an array
-                        @(
-                            (@field)
-                            (@ifFieldIsScalar.rest.rest.first.if)
-                            
-                            "  " $padded.get " )" @fieldType ") = (is-array)" 5 print-strings
-                        )
-                        
+                        @fieldType
+                        @maxFieldTypeNameLength
+                        [
+                          { $paddedFieldTypeName }
+                          
+                          # print the value of scalars
+                          @(
+                              (@field)
+                              (@ifFieldIsScalar.rest.rest.first.not.if)
+                              
+                              $structure.get
+                              [ { $value }
+                                "  " $paddedFieldName.get " (" $paddedFieldTypeName.get ") = " $value.get 6 print-strings
+                              ]
+                              @name//@fieldName.with-repr
+                          )
+                          
+                          # just print out that a value is an array
+                          @(
+                              (@field)
+                              (@ifFieldIsScalar.rest.rest.first.if)
+                              
+                              "  " $paddedFieldName.get " )" @fieldType ") = (is-array)" 5 print-strings
+                          )
+                        ]
+                        strings/with-right-padded-to-length
                       ]
                       strings/with-right-padded-to-length
                   )

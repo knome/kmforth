@@ -1,10 +1,14 @@
 
 # shorthand syntax for defining enums, values, and a with-repr functions for them
 # 
+# ASSUMPTIONS
+#   you won't define 0 twice
+#   values are arranged smaller to larger
+# 
 # @ enums/define-u64 enum-name (
-#   (name      value)
-#   (other     value)
-#   (different value)
+#   (name      1)
+#   (other     2)
+#   (different 3)
 # );
 # 
 # basic helpers to get the numeric and string values of an enum entry
@@ -58,7 +62,7 @@
     0
     @(
       (@enums)
-      (@e.each)
+      (@e.reverse.each) # we reverse them so that larger values will have the chance to clear smaller ones before they connect
       
       @(
         (@e @e)

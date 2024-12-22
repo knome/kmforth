@@ -88,6 +88,43 @@
   
   : @name.size 0 @( (@fields) (@f.each) @( (@f) ((@fn @ft @fa @fr)) @ft.size @fr * + ) ) ;
   
+  : @name.get
+    @name.size 8 is-bigger-than
+    [
+      # make this a runtime error for now. we'll need to move sizes into the macros to avoid it
+      "[@name@.get] structure is too large for .get operation" panic
+    ]
+    [
+      # fields will defer to this as their own .get
+      # getting a structure makes a copy of it
+      # if you want the addr of a field, use .addr on it
+      #                      # [: src
+      0 stack/datastack-addr # [: src dst
+      swap                   # [: dst src
+      @name.size             # [: dst src len
+      memory/memmove
+    ]
+    if
+  ;
+  
+  : @name.set
+    @name.size 8 is-bigger-than
+    [
+      # make this a runtime error for now. we'll need to move sizes into the macros to avoid it
+      "[@name@.set] structure is too large for .set operation" panic
+    ]
+    [
+      #                    # [: dst
+      stack/datastack-addr # [: dst src
+      @name.size           # [: dst src len
+      memory/memmove
+      pop
+    ]
+    if
+  ;
+  
+  : @name.with-repr { $todo } "[type:@name@]" $todo.call ;
+
   # a big wad of overcomplex macro expansion for printing out the current value of some structure
   : @name.print { $structure }
       @(
@@ -184,19 +221,26 @@
                               (@field)
                               (@ifFieldIsScalar.rest.rest.first.not.if)
                               
-                              $structure.get
-                              [ { $value }
-                                "  " $paddedFieldName.get " (" $paddedFieldTypeName.get ") = " $value.get 6 print-strings
+                              @name//@fieldName.size 8 is-bigger-than
+                              [
+                                  "  " $paddedFieldName.get " (" $paddedFieldTypeName.get ") = (is large structure)" 5 print-strings
                               ]
-                              @name//@fieldName.with-repr
+                              [
+                                  $structure.get
+                                  [ { $value }
+                                    "  " $paddedFieldName.get " (" $paddedFieldTypeName.get ") = " $value.get 6 print-strings
+                                  ]
+                                  @name//@fieldName.with-repr
+                              ]
+                              if
                           )
                           
                           # just print out that a value is an array
                           @(
-                              (@field)
-                              (@ifFieldIsScalar.rest.rest.first.if)
+                              (@field @field)
+                              (@ifFieldIsArray.rest.rest.first.if @arrayEntries.rest.rest.rest.first.string)
                               
-                              "  " $paddedFieldName.get " )" @fieldType ") = (is-array)" 5 print-strings
+                              "  " $paddedFieldName.get " (" $paddedFieldTypeName.get "[" @arrayEntries "]) = (is-array)" 7 print-strings
                           )
                         ]
                         strings/with-right-padded-to-length

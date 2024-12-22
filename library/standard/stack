@@ -78,6 +78,17 @@
   `
 ;
 
+# fetch the address of the top item on the stack
+# (remember that datastack points to the next empty slot, so we have to step back)
+:stack/datastack-addr
+  `
+  mov rax, r14   ; get address of next data slot
+  sub rax, 8     ; step back to get the current top data slot
+  mov [r14], rax ; push that into the next data slot
+  add r14, 8     ; bump r14 to the next next data slot, since we just filled the previous one
+  `
+;
+
 :stack/datastack-depth
   `
   mov rax, r14          ; copy current callstack location

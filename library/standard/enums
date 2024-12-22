@@ -61,8 +61,8 @@
       (@e.each)
       
       @(
-        (@e)
-        ((@name @value))
+        (@e @e)
+        (@skipZero.rest.first.if (@name @value))
         
         $value.get @value and
         [
@@ -71,23 +71,88 @@
             "|" swap incr
           ]
           when
-          "@name@" swap incr
+          "@typename@//@name@" swap incr
+          
+          # whenever we get a match, subtract it from the
+          # remaining value so that when we get to the end,
+          # we can use remaining unknown values to trigger
+          # adding an unknown entry, instead of just checking
+          # if anything matched, which is errant in a partial
+          # matching case
+          [@value -] $value.update
         ]
         when
       )
     )
     
-    dup
+    $value.get
     [
-      $todo.get strings/with-strings-as-string
+        # leftover values, add an unknown before calling
+        
+        # (also add a | if there were previous matches)
+        dup
+        [
+          "|" swap incr
+        ]
+        when
+        
+        $value.get
+        [ { $n $v }
+          "@typename@//unknown[" $v.get "]" $n.get 3 + $todo.get strings/with-strings-as-string
+        ]
+        strings/with-unsigned-as-string
     ]
     [
-      pop
-      $value.get
-      [ { $v }
-        "@typename@//unknown[" $v.get "]" 3 $todo.get strings/with-strings-as-string
-      ]
-      strings/with-unsigned-as-string
+        # if nothing is leftover, we check if we had any matches
+        dup
+        [
+           # if we had matches, then whatever we've collected is correct, send that
+           $todo.get strings/with-strings-as-string
+        ]
+        [
+           # if not, we either send a zero value if any was specified by the enum creator
+           # or else send an unknown value
+           
+           pop
+           
+           @(
+             # create a macrolist containing any entries with a value of 0
+             ( (@( (@enums) (@zeroCheck.each.rest.first.not.if) 1)))
+             ( @hasZero.count )
+             
+             @(
+               (@hasZero)
+               (@hadAZero.if)
+               
+               # if we had a zero, we need to find it and expand it here so we can send back a proper name for the set
+               @(
+                 (@enums)
+                 (@e.each)
+                 
+                 @(
+                   (@e)
+                   ((@name @value))
+                   
+                   @(
+                     (@value)
+                     (@.not.if)
+                     
+                     "@typename@//@name@" $todo.call
+                   )
+                 )
+               )
+             )
+             
+             @(
+               (@hasZero)
+               (@didntHaveAZero.not.if)
+               
+               # there was no zero, so instead we just pop out an unknown for it
+               "@typename//unknown[0]" $todo.call
+             )
+           )
+        ]
+        if
     ]
     if
   ;

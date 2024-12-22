@@ -223,7 +223,7 @@
                               
                               @name//@fieldName.size 8 is-bigger-than
                               [
-                                  "  " $paddedFieldName.get " (" $paddedFieldTypeName.get ") = (is large structure)" 5 print-strings
+                                  "  " $paddedFieldName.get " (" $paddedFieldTypeName.get ") = (large structure)" 5 print-strings
                               ]
                               [
                                   $structure.get

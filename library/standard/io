@@ -220,5 +220,65 @@
     ]                       #[: ss... <iovec-array-size> <todo-with-stack-iovec>
     stack/with-stack-buffer #[: err <>
   ] stack/with-escape
+;
+
+# the following depend on the fact that we never actually use the default stack in kmforth
+# because of that, the stack will maintain its original arguments indefinitely, being argc, argv[...], null, env[...], null
+# so we can use that to get any arguments or environment variables
+
+:arguments.count
+  `
+  mov rax, [rsp]
+  mov qword [r14], rax
+  add r14, 8
+  `
+;
+
+:arguments.nth
+  `
+  mov rbx, qword [r14-8]
+  inc rbx
+  mov rax, qword [rsp+8*rbx]
+  mov qword [r14-8], rax
+  `
+;
+
+:arguments.print-all
+  "argument-count:\n  "
+  write
   
+  "failed-to-write"
+  errno/panic-on-error
+  
+  arguments.count
+  printno
+  
+  "arguments:"
+  print
+  
+  arguments.count
+  [
+    arguments.nth "  " swap 2 print-strings
+  ]
+  for-range
+;
+
+:envvar.nth
+  `
+  mov rbx, qword [rsp]
+  add rbx, qword [r14-8]
+  mov rax, qword [rsp+rbx*8+16]
+  mov qword [r14-8], rax
+  `
+;
+
+:envvar.print-all
+  "environment-variables:" print
+  0
+  [ dup incr swap envvar.nth dup ]
+  [
+    "  " swap 2 print-strings
+  ]
+  while
+  pop pop
 ;

@@ -68,7 +68,8 @@
         (@e @e)
         (@skipZero.rest.first.if (@name @value))
         
-        $value.get @value and
+        # we check the anded value with the test value to ensure multibit flags are fully set and not partially
+        $value.get @value and @value ==
         [
           dup
           [
